@@ -21,11 +21,20 @@ HEADERS = {
 sessions = {}
 
 def save_to_db(table, data):
-    req.post(
+    res = req.post(
         f"{SUPABASE_URL}/rest/v1/{table}",
         json=data,
         headers=HEADERS
     )
+    return res
+
+def get_from_db(table, phone):
+    res = req.get(
+        f"{SUPABASE_URL}/rest/v1/{table}?phone=eq.{phone}",
+        headers=HEADERS
+    )
+    data = res.json()
+    return data[0] if data else None
 
 @app.get("/")
 def root():
@@ -44,6 +53,8 @@ async def whatsapp_webhook(
         sessions[phone] = {"step": "start"}
 
     session = sessions[phone]
+
+    # ─── REGISTRATION FLOW ───
 
     if session["step"] == "start":
         response.message(
@@ -68,7 +79,10 @@ async def whatsapp_webhook(
     elif session["step"] == "name":
         sessions[phone]["name"] = Body.strip()
         sessions[phone]["step"] = "location"
-        response.message(f"Nice to meet you {Body.strip()}! What is your village or town name?")
+        response.message(
+            f"Nice to meet you {Body.strip()}! "
+            f"What is your village or town name?"
+        )
 
     elif session["step"] == "location":
         sessions[phone]["location"] = Body.strip()
@@ -103,10 +117,79 @@ async def whatsapp_webhook(
 
         sessions[phone]["step"] = "done"
 
+    # ─── MAIN MENU ───
+
     elif session["step"] == "done":
+        if message == "POST JOB":
+            # Check if this person is actually a farmer
+            farmer = get_from_db("farmers", phone)
+            if not farmer:
+                response.message(
+                    "❌ Only registered farmers can post jobs.\n"
+                    "Reply FARMER to register as a farmer first."
+                )
+            else:
+                sessions[phone]["step"] = "job_work_type"
+                sessions[phone]["job"] = {}
+                response.message(
+                    "📋 Let's post your job!\n\n"
+                    "What type of work is needed?\n"
+                    "(e.g. Harvesting, Planting, Irrigation, Weeding)"
+                )
+        else:
+            response.message(
+                "Reply POST JOB to post a new job. 🌾"
+            )
+
+    # ─── JOB POSTING FLOW ───
+
+    elif session["step"] == "job_work_type":
+        sessions[phone]["job"]["work_type"] = Body.strip()
+        sessions[phone]["step"] = "job_num_labourers"
+        response.message("How many labourers do you need?")
+
+    elif session["step"] == "job_num_labourers":
+        if not Body.strip().isdigit():
+            response.message("Please enter a number. How many labourers do you need?")
+        else:
+            sessions[phone]["job"]["num_labourers"] = int(Body.strip())
+            sessions[phone]["step"] = "job_wage"
+            response.message("What is the wage per day? (in ₹)")
+
+    elif session["step"] == "job_wage":
+        sessions[phone]["job"]["wage"] = Body.strip()
+        sessions[phone]["step"] = "job_date"
+        response.message("When do you need them? (e.g. Tomorrow, 20 June)")
+
+    elif session["step"] == "job_date":
+        job = sessions[phone]["job"]
+        job["start_date"] = Body.strip()
+
+        # Get farmer's location
+        farmer = get_from_db("farmers", phone)
+        location = farmer["location"] if farmer else "Unknown"
+
+        # Save job to database
+        save_to_db("jobs", {
+            "farmer_phone": phone,
+            "work_type": job["work_type"],
+            "num_labourers": job["num_labourers"],
+            "wage": job["wage"],
+            "start_date": job["start_date"],
+            "location": location,
+            "status": "open"
+        })
+
         response.message(
-            "You are already registered! 🌾\n"
-            "Reply POST JOB to post a job."
+            f"✅ Job Posted Successfully!\n\n"
+            f"📍 Location: {location}\n"
+            f"🔨 Work: {job['work_type']}\n"
+            f"👥 Labourers needed: {job['num_labourers']}\n"
+            f"💰 Wage: ₹{job['wage']}/day\n"
+            f"📅 Date: {job['start_date']}\n\n"
+            f"We are notifying nearby labourers now!"
         )
+
+        sessions[phone]["step"] = "done"
 
     return Response(content=str(response), media_type="application/xml")
