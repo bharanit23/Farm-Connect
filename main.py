@@ -1,8 +1,9 @@
 import os
 import traceback
+import threading
+import time
 import requests as req
-from fastapi import FastAPI, Form, Request, Response
-from fastapi.responses import PlainTextResponse
+from fastapi import FastAPI, Form, Response
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.rest import Client
 from dotenv import load_dotenv
@@ -12,11 +13,31 @@ load_dotenv()
 
 app = FastAPI()
 
+# ── Keep-alive: prevents Render free tier from spinning down ──────────────────
+def keep_alive():
+    while True:
+        time.sleep(840)  # every 14 minutes
+        try:
+            req.get("https://farm-connect-yjg8.onrender.com/", timeout=10)
+            print("[KEEP-ALIVE] Pinged successfully")
+        except Exception as e:
+            print(f"[KEEP-ALIVE] Ping failed: {e}")
+
+threading.Thread(target=keep_alive, daemon=True).start()
+
+# ── Env vars ──────────────────────────────────────────────────────────────────
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_FROM = "whatsapp:+14155238886"
+
+print("=== STARTUP ENV CHECK ===")
+print(f"SUPABASE_URL  : {'SET' if SUPABASE_URL else '*** MISSING ***'}")
+print(f"SUPABASE_KEY  : {'SET' if SUPABASE_KEY else '*** MISSING ***'}")
+print(f"TWILIO_SID    : {'SET' if TWILIO_ACCOUNT_SID else '*** MISSING ***'}")
+print(f"TWILIO_TOKEN  : {'SET' if TWILIO_AUTH_TOKEN else '*** MISSING ***'}")
+print("=========================")
 
 HEADERS = {
     "apikey": SUPABASE_KEY,
@@ -25,137 +46,121 @@ HEADERS = {
     "Prefer": "return=representation"
 }
 
-# In-memory sessions — survives within a single server process.
-# On redeploy, sessions reset, but registered users are re-fetched from DB gracefully.
 sessions = {}
 
 
-# ─── DATABASE HELPERS ───────────────────────────────────────────────────────────
+# ── Database helpers ──────────────────────────────────────────────────────────
 
 def save_to_db(table, data):
-    """Insert a row and return the saved record (or None on error)."""
     try:
-        res = req.post(
-            f"{SUPABASE_URL}/rest/v1/{table}",
-            json=data,
-            headers=HEADERS,
-            timeout=10
-        )
+        url = f"{SUPABASE_URL}/rest/v1/{table}"
+        print(f"[DB] POST {url} | data={data}")
+        res = req.post(url, json=data, headers=HEADERS, timeout=10)
+        print(f"[DB] POST status={res.status_code} | body={res.text[:300]}")
         res.raise_for_status()
         result = res.json()
         return result[0] if isinstance(result, list) and result else None
     except Exception as e:
-        print(f"[save_to_db] Error saving to {table}: {e}\n{traceback.format_exc()}")
+        print(f"[DB] save_to_db ERROR: {e}\n{traceback.format_exc()}")
         return None
 
 
 def get_from_db(table, phone):
-    """Fetch a single row by phone number (returns dict or None)."""
     try:
         encoded_phone = quote(phone, safe="")
-        res = req.get(
-            f"{SUPABASE_URL}/rest/v1/{table}?phone=eq.{encoded_phone}",
-            headers=HEADERS,
-            timeout=10
-        )
+        url = f"{SUPABASE_URL}/rest/v1/{table}?phone=eq.{encoded_phone}"
+        print(f"[DB] GET {url}")
+        res = req.get(url, headers=HEADERS, timeout=10)
+        print(f"[DB] GET status={res.status_code} | body={res.text[:300]}")
         res.raise_for_status()
         data = res.json()
         return data[0] if isinstance(data, list) and data else None
     except Exception as e:
-        print(f"[get_from_db] Error fetching from {table}: {e}\n{traceback.format_exc()}")
+        print(f"[DB] get_from_db ERROR: {e}\n{traceback.format_exc()}")
         return None
 
 
 def update_db(table, filters, data):
-    """PATCH rows matching filters. Returns list of updated rows (or empty list)."""
     try:
-        query = "&".join(
-            f"{k}=eq.{quote(str(v), safe='')}" for k, v in filters.items()
-        )
-        res = req.patch(
-            f"{SUPABASE_URL}/rest/v1/{table}?{query}",
-            json=data,
-            headers=HEADERS,
-            timeout=10
-        )
+        query = "&".join(f"{k}=eq.{quote(str(v), safe='')}" for k, v in filters.items())
+        url = f"{SUPABASE_URL}/rest/v1/{table}?{query}"
+        print(f"[DB] PATCH {url} | data={data}")
+        res = req.patch(url, json=data, headers=HEADERS, timeout=10)
+        print(f"[DB] PATCH status={res.status_code} | body={res.text[:300]}")
         res.raise_for_status()
         result = res.json()
         return result if isinstance(result, list) else []
     except Exception as e:
-        print(f"[update_db] Error updating {table}: {e}\n{traceback.format_exc()}")
+        print(f"[DB] update_db ERROR: {e}\n{traceback.format_exc()}")
         return []
 
 
 def get_jobs_by_phone(phone):
-    """Fetch the 5 most recent jobs for a farmer."""
     try:
         encoded_phone = quote(phone, safe="")
-        res = req.get(
+        url = (
             f"{SUPABASE_URL}/rest/v1/jobs"
             f"?farmer_phone=eq.{encoded_phone}"
-            f"&order=created_at.desc&limit=5",
-            headers=HEADERS,
-            timeout=10
+            f"&order=created_at.desc&limit=5"
         )
+        print(f"[DB] GET jobs: {url}")
+        res = req.get(url, headers=HEADERS, timeout=10)
+        print(f"[DB] GET status={res.status_code} | body={res.text[:300]}")
         res.raise_for_status()
         return res.json() if isinstance(res.json(), list) else []
     except Exception as e:
-        print(f"[get_jobs_by_phone] Error: {e}\n{traceback.format_exc()}")
+        print(f"[DB] get_jobs_by_phone ERROR: {e}\n{traceback.format_exc()}")
         return []
 
 
 def get_open_jobs_by_location(location):
-    """Fetch up to 5 open jobs matching the given location (case-insensitive)."""
     try:
-        # FIX: ilike requires % wildcards for partial matching
         encoded_location = quote(f"%{location}%", safe="")
-        res = req.get(
+        url = (
             f"{SUPABASE_URL}/rest/v1/jobs"
             f"?location=ilike.{encoded_location}"
-            f"&status=eq.open&limit=5",
-            headers=HEADERS,
-            timeout=10
+            f"&status=eq.open&limit=5"
         )
+        print(f"[DB] GET open jobs: {url}")
+        res = req.get(url, headers=HEADERS, timeout=10)
+        print(f"[DB] GET status={res.status_code} | body={res.text[:300]}")
         res.raise_for_status()
         return res.json() if isinstance(res.json(), list) else []
     except Exception as e:
-        print(f"[get_open_jobs_by_location] Error: {e}\n{traceback.format_exc()}")
+        print(f"[DB] get_open_jobs_by_location ERROR: {e}\n{traceback.format_exc()}")
         return []
 
 
 def get_labourers_by_location(location):
-    """Fetch all labourers in a given location for job notifications."""
     try:
         encoded_location = quote(f"%{location}%", safe="")
-        res = req.get(
-            f"{SUPABASE_URL}/rest/v1/labourers"
-            f"?location=ilike.{encoded_location}",
-            headers=HEADERS,
-            timeout=10
-        )
+        url = f"{SUPABASE_URL}/rest/v1/labourers?location=ilike.{encoded_location}"
+        print(f"[DB] GET labourers: {url}")
+        res = req.get(url, headers=HEADERS, timeout=10)
+        print(f"[DB] GET status={res.status_code} | body={res.text[:300]}")
         res.raise_for_status()
         return res.json() if isinstance(res.json(), list) else []
     except Exception as e:
-        print(f"[get_labourers_by_location] Error: {e}\n{traceback.format_exc()}")
+        print(f"[DB] get_labourers_by_location ERROR: {e}\n{traceback.format_exc()}")
         return []
 
 
-# ─── TWILIO HELPERS ─────────────────────────────────────────────────────────────
+# ── Twilio helpers ────────────────────────────────────────────────────────────
 
 def send_whatsapp(to, message):
-    """Send a WhatsApp message via Twilio (out-of-band, not TwiML)."""
     try:
+        print(f"[TWILIO] Sending to {to}: {message[:80]}")
         client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-        client.messages.create(body=message, from_=TWILIO_FROM, to=to)
+        msg = client.messages.create(body=message, from_=TWILIO_FROM, to=to)
+        print(f"[TWILIO] Sent OK — SID={msg.sid}")
     except Exception as e:
-        print(f"[send_whatsapp] Error sending to {to}: {e}\n{traceback.format_exc()}")
+        print(f"[TWILIO] ERROR sending to {to}: {e}\n{traceback.format_exc()}")
 
 
 def notify_nearby_labourers(job):
-    """Notify all labourers in the same location about a new job."""
     labourers = get_labourers_by_location(job["location"])
+    print(f"[NOTIFY] Found {len(labourers)} labourer(s) near {job['location']}")
     for labourer in labourers:
-        # Don't notify the farmer themselves if they're also registered as labourer
         if labourer.get("phone") != job.get("farmer_phone"):
             send_whatsapp(
                 labourer["phone"],
@@ -169,17 +174,16 @@ def notify_nearby_labourers(job):
 
 
 def twiml_response(text):
-    """Helper to build a TwiML XML response string."""
+    print(f"[REPLY] {text[:120]}")
     r = MessagingResponse()
     r.message(text)
     return Response(content=str(r), media_type="application/xml")
 
 
-# ─── ROUTES ─────────────────────────────────────────────────────────────────────
+# ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.api_route("/", methods=["GET", "HEAD"])
 def root():
-    """Health check endpoint — supports both GET and HEAD (Render uses HEAD)."""
     return {"message": "Farm Connect API is running"}
 
 
@@ -193,14 +197,16 @@ async def whatsapp_webhook(
         message = raw_body.upper()
         phone = From
 
-        # Initialise session for new callers
+        print(f"\n{'='*60}")
+        print(f"[WEBHOOK] FROM={phone} | RAW='{raw_body}' | UPPER='{message}'")
+
         if phone not in sessions:
             sessions[phone] = {"step": "start"}
 
-        session = sessions[phone]
-        step = session.get("step", "start")
+        step = sessions[phone].get("step", "start")
+        print(f"[SESSION] step='{step}' | session={sessions[phone]}")
 
-        # ── START: identify returning vs new user ────────────────────────────
+        # ── START ─────────────────────────────────────────────────────────────
 
         if step == "start":
             farmer = get_from_db("farmers", phone)
@@ -212,7 +218,6 @@ async def whatsapp_webhook(
                     f"POST JOB — Post a new job\n"
                     f"MY JOBS — View your posted jobs"
                 )
-
             labourer = get_from_db("labourers", phone)
             if labourer:
                 sessions[phone] = {"step": "done", "role": "labourer"}
@@ -221,7 +226,6 @@ async def whatsapp_webhook(
                     f"Reply:\n"
                     f"VIEW JOBS — See available jobs near you"
                 )
-
             sessions[phone]["step"] = "role"
             return twiml_response(
                 "🌾 Welcome to Farm Connect!\n\n"
@@ -229,28 +233,25 @@ async def whatsapp_webhook(
                 "Reply FARMER or LABOURER to get started."
             )
 
-        # ── REGISTRATION FLOW ────────────────────────────────────────────────
+        # ── REGISTRATION ──────────────────────────────────────────────────────
 
         elif step == "role":
             if message in ("FARMER", "LABOURER"):
                 sessions[phone]["role"] = message.lower()
                 sessions[phone]["step"] = "name"
                 return twiml_response("Great! What is your name?")
-            else:
-                return twiml_response("Please reply with FARMER or LABOURER only.")
+            return twiml_response("Please reply with FARMER or LABOURER only.")
 
         elif step == "name":
             sessions[phone]["name"] = raw_body
             sessions[phone]["step"] = "location"
             return twiml_response(
-                f"Nice to meet you {raw_body}! "
-                f"What is your village or town name?"
+                f"Nice to meet you {raw_body}! What is your village or town name?"
             )
 
         elif step == "location":
             sessions[phone]["location"] = raw_body.title()
             role = sessions[phone].get("role")
-
             if role == "labourer":
                 sessions[phone]["step"] = "skill"
                 return twiml_response(
@@ -269,9 +270,7 @@ async def whatsapp_webhook(
                     "location": sessions[phone]["location"]
                 })
                 if not saved:
-                    return twiml_response(
-                        "⚠️ There was an error saving your details. Please try again."
-                    )
+                    return twiml_response("⚠️ Error saving your details. Please try again.")
                 sessions[phone]["step"] = "done"
                 return twiml_response(
                     f"✅ Registered as Farmer!\n\n"
@@ -292,7 +291,6 @@ async def whatsapp_webhook(
             skill = skill_map.get(message)
             if not skill:
                 return twiml_response("Please reply with a number 1-5 or skill name.")
-
             saved = save_to_db("labourers", {
                 "phone": phone,
                 "name": sessions[phone]["name"],
@@ -300,9 +298,7 @@ async def whatsapp_webhook(
                 "skill": skill
             })
             if not saved:
-                return twiml_response(
-                    "⚠️ There was an error saving your details. Please try again."
-                )
+                return twiml_response("⚠️ Error saving your details. Please try again.")
             sessions[phone]["step"] = "done"
             sessions[phone]["role"] = "labourer"
             return twiml_response(
@@ -313,11 +309,11 @@ async def whatsapp_webhook(
                 f"Reply VIEW JOBS to see available jobs near you."
             )
 
-        # ── MAIN MENU ────────────────────────────────────────────────────────
+        # ── MAIN MENU ─────────────────────────────────────────────────────────
 
         elif step == "done":
+            print(f"[FLOW] DONE menu — message='{message}'")
 
-            # POST JOB
             if message == "POST JOB":
                 farmer = get_from_db("farmers", phone)
                 if not farmer:
@@ -330,7 +326,6 @@ async def whatsapp_webhook(
                     "(e.g. Harvesting, Planting, Irrigation, Weeding)"
                 )
 
-            # MY JOBS
             elif message == "MY JOBS":
                 farmer = get_from_db("farmers", phone)
                 if not farmer:
@@ -352,7 +347,6 @@ async def whatsapp_webhook(
                 msg += "Reply CANCEL [ID] to cancel a job."
                 return twiml_response(msg)
 
-            # VIEW JOBS
             elif message == "VIEW JOBS":
                 labourer = get_from_db("labourers", phone)
                 if not labourer:
@@ -361,7 +355,7 @@ async def whatsapp_webhook(
                 if not jobs:
                     return twiml_response(
                         f"No open jobs in {labourer['location']} right now.\n"
-                        f"We will notify you when new jobs are posted!"
+                        f"We'll notify you when new jobs are posted!"
                     )
                 msg = f"🔍 Open Jobs in {labourer['location']}:\n\n"
                 for i, job in enumerate(jobs):
@@ -373,13 +367,11 @@ async def whatsapp_webhook(
                     )
                 return twiml_response(msg)
 
-            # CONFIRM [job_id]
             elif message.startswith("CONFIRM"):
                 parts = raw_body.split()
                 if len(parts) < 2:
                     return twiml_response(
-                        "Please reply CONFIRM followed by job ID.\n"
-                        "Example: CONFIRM 1"
+                        "Please reply CONFIRM followed by job ID.\nExample: CONFIRM 1"
                     )
                 job_id = parts[1]
                 labourer = get_from_db("labourers", phone)
@@ -411,13 +403,11 @@ async def whatsapp_webhook(
                     f"Please arrive on time. Good luck! 💪"
                 )
 
-            # CANCEL [job_id]
             elif message.startswith("CANCEL"):
                 parts = raw_body.split()
                 if len(parts) < 2:
                     return twiml_response(
-                        "Please reply CANCEL followed by job ID.\n"
-                        "Example: CANCEL 1"
+                        "Please reply CANCEL followed by job ID.\nExample: CANCEL 1"
                     )
                 job_id = parts[1]
                 updated = update_db(
@@ -426,12 +416,9 @@ async def whatsapp_webhook(
                     {"status": "cancelled"}
                 )
                 if not updated:
-                    return twiml_response(
-                        "❌ Job not found or you don't own this job."
-                    )
+                    return twiml_response("❌ Job not found or you don't own this job.")
                 return twiml_response(f"✅ Job #{job_id} has been cancelled.")
 
-            # UNKNOWN COMMAND
             else:
                 farmer = get_from_db("farmers", phone)
                 if farmer:
@@ -448,7 +435,6 @@ async def whatsapp_webhook(
                         f"Reply:\n"
                         f"VIEW JOBS — See available jobs near you"
                     )
-                # Fallback: session says done but user not in DB — restart
                 sessions[phone] = {"step": "start"}
                 return twiml_response(
                     "🌾 Welcome to Farm Connect!\n\n"
@@ -456,7 +442,7 @@ async def whatsapp_webhook(
                     "Reply FARMER or LABOURER to get started."
                 )
 
-        # ── JOB POSTING FLOW ─────────────────────────────────────────────────
+        # ── JOB POSTING FLOW ──────────────────────────────────────────────────
 
         elif step == "job_work_type":
             sessions[phone]["job"]["work_type"] = raw_body
@@ -465,9 +451,7 @@ async def whatsapp_webhook(
 
         elif step == "job_num_labourers":
             if not raw_body.isdigit():
-                return twiml_response(
-                    "Please enter a number. How many labourers do you need?"
-                )
+                return twiml_response("Please enter a number. How many labourers do you need?")
             sessions[phone]["job"]["num_labourers"] = int(raw_body)
             sessions[phone]["step"] = "job_wage"
             return twiml_response("What is the wage per day? (in ₹)")
@@ -484,14 +468,11 @@ async def whatsapp_webhook(
         elif step == "job_date":
             job = sessions[phone]["job"]
             job["start_date"] = raw_body
-
             farmer = get_from_db("farmers", phone)
             if not farmer:
                 sessions[phone]["step"] = "done"
                 return twiml_response("❌ Could not find your farmer profile. Please try again.")
-
             location = farmer.get("location", "Unknown")
-
             saved = save_to_db("jobs", {
                 "farmer_phone": phone,
                 "work_type": job["work_type"],
@@ -501,16 +482,12 @@ async def whatsapp_webhook(
                 "location": location,
                 "status": "open"
             })
-
             sessions[phone]["step"] = "done"
-
             if not saved:
                 return twiml_response(
-                    "⚠️ There was an error posting your job. Please try again by sending POST JOB."
+                    "⚠️ Error posting your job. Please try again by sending POST JOB."
                 )
-
             notify_nearby_labourers(saved)
-
             return twiml_response(
                 f"✅ Job Posted Successfully!\n\n"
                 f"📍 Location: {location}\n"
@@ -521,9 +498,10 @@ async def whatsapp_webhook(
                 f"Notifying nearby labourers now! 🔔"
             )
 
-        # ── FALLBACK: unknown session step ───────────────────────────────────
+        # ── FALLBACK ──────────────────────────────────────────────────────────
+
         else:
-            print(f"[webhook] Unknown session step '{step}' for {phone} — resetting.")
+            print(f"[FLOW] Unknown step '{step}' — resetting")
             sessions[phone] = {"step": "start"}
             return twiml_response(
                 "Something went wrong. Let's start over.\n\n"
@@ -532,7 +510,7 @@ async def whatsapp_webhook(
             )
 
     except Exception:
-        print(f"[webhook] Unhandled exception:\n{traceback.format_exc()}")
+        print(f"[WEBHOOK] UNHANDLED EXCEPTION:\n{traceback.format_exc()}")
         err = MessagingResponse()
-        err.message("⚠️ Something went wrong on our end. Please try again in a moment.")
+        err.message("⚠️ Something went wrong. Please try again in a moment.")
         return Response(content=str(err), media_type="application/xml")
