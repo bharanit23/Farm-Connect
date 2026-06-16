@@ -29,13 +29,14 @@ def save_to_db(table, data):
     return res
 
 def get_from_db(table, phone):
+    from urllib.parse import quote
+    encoded_phone = quote(phone, safe='')
     res = req.get(
-        f"{SUPABASE_URL}/rest/v1/{table}?phone=eq.{phone}",
+        f"{SUPABASE_URL}/rest/v1/{table}?phone=eq.{encoded_phone}",
         headers=HEADERS
     )
     data = res.json()
     return data[0] if data else None
-
 @app.get("/")
 def root():
     return {"message": "Farm Connect API is running"}
