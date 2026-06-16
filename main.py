@@ -57,7 +57,7 @@ def send_whatsapp(to, message):
 def notify_nearby_labourers(job):
     encoded_location = quote(job["location"], safe='')
     labourers = req.get(
-        f"{SUPABASE_URL}/rest/v1/labourers?location=eq.{encoded_location}",
+        f"{SUPABASE_URL}/rest/v1/labourers?location=ilike.{encoded_location}",
         headers=HEADERS
     ).json()
     for labourer in labourers:
@@ -134,10 +134,13 @@ async def whatsapp_webhook(
     elif session["step"] == "name":
         sessions[phone]["name"] = Body.strip()
         sessions[phone]["step"] = "location"
-        response.message(f"Nice to meet you {Body.strip()}! What is your village or town name?")
+        response.message(
+            f"Nice to meet you {Body.strip()}! "
+            f"What is your village or town name?"
+        )
 
     elif session["step"] == "location":
-        sessions[phone]["location"] = Body.strip()
+        sessions[phone]["location"] = Body.strip().title()
         role = sessions[phone]["role"]
 
         if role == "labourer":
@@ -223,7 +226,10 @@ async def whatsapp_webhook(
                     headers=HEADERS
                 ).json()
                 if not jobs:
-                    response.message("You haven't posted any jobs yet.\nReply POST JOB to post one.")
+                    response.message(
+                        "You haven't posted any jobs yet.\n"
+                        "Reply POST JOB to post one."
+                    )
                 else:
                     msg = "📋 Your Recent Jobs:\n\n"
                     for i, job in enumerate(jobs):
@@ -244,7 +250,7 @@ async def whatsapp_webhook(
             else:
                 encoded_location = quote(labourer["location"], safe='')
                 jobs = req.get(
-                    f"{SUPABASE_URL}/rest/v1/jobs?location=eq.{encoded_location}&status=eq.open&limit=5",
+                    f"{SUPABASE_URL}/rest/v1/jobs?location=ilike.{encoded_location}&status=eq.open&limit=5",
                     headers=HEADERS
                 ).json()
                 if not jobs:
@@ -267,7 +273,10 @@ async def whatsapp_webhook(
         elif message.startswith("CONFIRM"):
             parts = Body.strip().split()
             if len(parts) < 2:
-                response.message("Please reply CONFIRM followed by job ID.\nExample: CONFIRM 1")
+                response.message(
+                    "Please reply CONFIRM followed by job ID.\n"
+                    "Example: CONFIRM 1"
+                )
             else:
                 job_id = parts[1]
                 labourer = get_from_db("labourers", phone)
@@ -305,21 +314,25 @@ async def whatsapp_webhook(
         elif message.startswith("CANCEL"):
             parts = Body.strip().split()
             if len(parts) < 2:
-                response.message("Please reply CANCEL followed by job ID.\nExample: CANCEL 1")
+                response.message(
+                    "Please reply CANCEL followed by job ID.\n"
+                    "Example: CANCEL 1"
+                )
             else:
                 job_id = parts[1]
-                encoded_phone = quote(phone, safe='')
                 updated = update_db(
                     "jobs",
                     {"id": job_id, "farmer_phone": phone},
                     {"status": "cancelled"}
                 )
                 if not updated:
-                    response.message("❌ Job not found or you don't own this job.")
+                    response.message(
+                        "❌ Job not found or you don't own this job."
+                    )
                 else:
                     response.message(f"✅ Job #{job_id} has been cancelled.")
 
-        # UNKNOWN
+        # UNKNOWN COMMAND
         else:
             farmer = get_from_db("farmers", phone)
             if farmer:
@@ -347,7 +360,9 @@ async def whatsapp_webhook(
 
     elif session["step"] == "job_num_labourers":
         if not Body.strip().isdigit():
-            response.message("Please enter a number. How many labourers do you need?")
+            response.message(
+                "Please enter a number. How many labourers do you need?"
+            )
         else:
             sessions[phone]["job"]["num_labourers"] = int(Body.strip())
             sessions[phone]["step"] = "job_wage"
