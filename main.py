@@ -49,6 +49,73 @@ HEADERS = {
 sessions = {}
 
 
+# ── Fuzzy near-miss helper ────────────────────────────────────────────────────
+
+def _edit_distance(a, b):
+    """Standard Levenshtein distance."""
+    dp = list(range(len(b) + 1))
+    for i, ca in enumerate(a):
+        ndp = [i + 1]
+        for j, cb in enumerate(b):
+            ndp.append(min(dp[j] + (ca != cb), dp[j + 1] + 1, ndp[-1] + 1))
+        dp = ndp
+    return dp[-1]
+
+# Known commands, ordered longest-first so multi-word ones match before prefixes
+KNOWN_COMMANDS = [
+    "POST JOB", "MY JOBS", "MY LABOURERS", "VIEW JOBS",
+    "CONFIRM", "CANCEL", "RATE",
+]
+
+def fuzzy_suggestion(message, threshold=2):
+    """
+    Return a (suggestion, hint) tuple when the message looks like a
+    mis-typed command, else (None, None).
+
+    Strategy:
+      1. Prefix guard  — message starts with a known command root but has
+                         trailing garbage (e.g. "CANCELL 5", "RETE 3 4").
+      2. Edit-distance — whole message is within `threshold` edits of a
+                         known command (catches "CANCLE", "VEIW JOBS").
+    """
+    HINTS = {
+        "RATE":         "Format: RATE [job_id] [stars 1–5]  •  Example: RATE 12 5",
+        "CANCEL":       "Format: CANCEL [job_id]  •  Example: CANCEL 7",
+        "CONFIRM":      "Format: CONFIRM [job_id]  •  Example: CONFIRM 3",
+        "POST JOB":     "Just send: POST JOB",
+        "MY JOBS":      "Just send: MY JOBS",
+        "MY LABOURERS": "Just send: MY LABOURERS",
+        "VIEW JOBS":    "Just send: VIEW JOBS",
+    }
+
+    # 1. Prefix guard: "CANCELL 5" starts with "CANCEL" but has extras
+    for cmd in KNOWN_COMMANDS:
+        if message.startswith(cmd) and message != cmd:
+            # Only flag if the character right after the command isn't a space
+            # followed by a valid digit argument (those are handled upstream).
+            remainder = message[len(cmd):]
+            if remainder and not remainder.startswith(" "):
+                return cmd, HINTS[cmd]
+
+    # 2. Edit-distance on the first token or the whole short message
+    first_token = message.split()[0] if message.split() else message
+    for cmd in KNOWN_COMMANDS:
+        # Compare against just the first word of multi-word commands too
+        cmd_first = cmd.split()[0]
+        if _edit_distance(first_token, cmd_first) <= threshold:
+            # Avoid false positives on very short tokens like "MY"
+            if len(first_token) >= 3:
+                return cmd, HINTS[cmd]
+
+    # 3. Whole-message edit distance for short commands like "MY JOBS"
+    for cmd in KNOWN_COMMANDS:
+        if abs(len(message) - len(cmd)) <= threshold:
+            if _edit_distance(message, cmd) <= threshold:
+                return cmd, HINTS[cmd]
+
+    return None, None
+
+
 # ── Database helpers ──────────────────────────────────────────────────────────
 
 def save_to_db(table, data):
@@ -368,8 +435,12 @@ async def whatsapp_webhook(
 
             elif message.startswith("RATE"):
                 parts = raw_body.split()
-                if len(parts) != 3 or not parts[2].isdigit():
-                    return twiml_response("Format: RATE [job_id] [stars 1-5]\nExample: RATE 12 5")
+                if len(parts) != 3 or not parts[1].isdigit() or not parts[2].isdigit():
+                    return twiml_response(
+                        "❓ Couldn't read that.\n\n"
+                        "Format: RATE [job_id] [stars 1–5]\n"
+                        "Example: RATE 12 5"
+                    )
                 job_id, stars = parts[1], int(parts[2])
                 if stars < 1 or stars > 5:
                     return twiml_response("Stars must be between 1 and 5.")
@@ -454,7 +525,9 @@ async def whatsapp_webhook(
                 parts = raw_body.split()
                 if len(parts) < 2 or not parts[1].isdigit():
                     return twiml_response(
-                        "Please reply CONFIRM followed by a valid job ID.\nExample: CONFIRM 1"
+                        "❓ Couldn't read that.\n\n"
+                        "Format: CONFIRM [job_id]\n"
+                        "Example: CONFIRM 3"
                     )
                 job_id = parts[1]
                 labourer = get_from_db("labourers", phone)
@@ -490,7 +563,9 @@ async def whatsapp_webhook(
                 parts = raw_body.split()
                 if len(parts) < 2 or not parts[1].isdigit():
                     return twiml_response(
-                        "Please reply CANCEL followed by a valid job ID.\nExample: CANCEL 1"
+                        "❓ Couldn't read that.\n\n"
+                        "Format: CANCEL [job_id]\n"
+                        "Example: CANCEL 7"
                     )
                 job_id = parts[1]
                 updated = update_db(
@@ -513,12 +588,22 @@ async def whatsapp_webhook(
                     )
                 return twiml_response(f"✅ Job #{job_id} has been cancelled.")
 
+            # ── Unknown / near-miss command ───────────────────────────────────
             else:
+                suggestion, hint = fuzzy_suggestion(message)
+                if suggestion:
+                    return twiml_response(
+                        f"❓ Unknown command. Did you mean *{suggestion}*?\n\n"
+                        f"{hint}\n\n"
+                        f"Send it exactly as shown to continue."
+                    )
+
+                # Truly unrecognised — show role-appropriate menu
                 farmer = get_from_db("farmers", phone)
                 if farmer:
                     return twiml_response(
-                        f"Hello {farmer['name']}! 🌾\n\n"
-                        f"Reply:\n"
+                        f"❌ Unknown command.\n\n"
+                        f"Hello {farmer['name']}! 🌾 Available commands:\n"
                         f"POST JOB — Post a new job\n"
                         f"MY JOBS — View your posted jobs\n"
                         f"MY LABOURERS — See confirmed jobs & rate labourers"
@@ -526,8 +611,8 @@ async def whatsapp_webhook(
                 labourer = get_from_db("labourers", phone)
                 if labourer:
                     return twiml_response(
-                        f"Hello {labourer['name']}! 👋\n\n"
-                        f"Reply:\n"
+                        f"❌ Unknown command.\n\n"
+                        f"Hello {labourer['name']}! 👋 Available commands:\n"
                         f"VIEW JOBS — See available jobs near you"
                     )
                 sessions[phone] = {"step": "start"}
