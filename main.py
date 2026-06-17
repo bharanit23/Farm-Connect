@@ -1,7 +1,9 @@
 import os
+import re
 import traceback
 import threading
 import time
+from datetime import datetime, date
 import requests as req
 from fastapi import FastAPI, Form, Response
 from twilio.twiml.messaging_response import MessagingResponse
@@ -114,6 +116,129 @@ def fuzzy_suggestion(message, threshold=2):
                 return cmd, HINTS[cmd]
 
     return None, None
+
+
+# ── Date parsing / validation helper ─────────────────────────────────────────
+
+MONTHS = {
+    "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
+    "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6, "jul": 7, "july": 7,
+    "aug": 8, "august": 8, "sep": 9, "sept": 9, "september": 9, "oct": 10,
+    "october": 10, "nov": 11, "november": 11, "dec": 12, "december": 12,
+}
+
+# Explicit datetime formats we try first (day-month-year style, since this
+# is an Indian-farmer-facing app — avoids US-style month/day ambiguity).
+DATE_FORMATS = [
+    "%d %B %Y", "%d %b %Y", "%d %B", "%d %b",
+    "%d-%m-%Y", "%d/%m/%Y", "%d-%m", "%d/%m",
+    "%B %d %Y", "%b %d %Y", "%B %d", "%b %d",
+    "%Y-%m-%d",
+]
+
+
+def parse_relative_date(text):
+    """Handle TODAY / TOMORROW / NEXT WEEK style phrases. Returns a date or None."""
+    t = text.strip().lower()
+    today = date.today()
+    if t == "today":
+        return today
+    if t == "tomorrow":
+        return today.fromordinal(today.toordinal() + 1)
+    if t == "next week":
+        return today.fromordinal(today.toordinal() + 7)
+    return None
+
+
+def parse_job_date(raw_text):
+    """
+    Try to parse a farmer-entered date string into a date object.
+
+    Returns (parsed_date, error_message). If parsing fails entirely,
+    parsed_date is None and error_message explains why. If parsing
+    succeeds but the date is in the past, parsed_date is None and
+    error_message explains the past-date problem.
+    """
+    text = raw_text.strip()
+    today = date.today()
+
+    # 1. Relative phrases
+    rel = parse_relative_date(text)
+    if rel:
+        return rel, None
+
+    # 2. Try explicit formats, filling in missing year with the current
+    #    (or next, if the resulting date would be in the past) year.
+    for fmt in DATE_FORMATS:
+        try:
+            parsed = datetime.strptime(text.title() if "%B" in fmt or "%b" in fmt else text, fmt)
+        except ValueError:
+            continue
+
+        if "%Y" not in fmt:
+            # No year given — assume current year, roll to next year if that's already past
+            candidate = parsed.replace(year=today.year).date()
+            if candidate < today:
+                candidate = candidate.replace(year=today.year + 1)
+            return candidate, None
+        else:
+            return parsed.date(), None
+
+    # 3. Loose regex fallback: "20 june 2026", "20th june", "june 20"
+    cleaned = re.sub(r"(\d+)(st|nd|rd|th)", r"\1", text, flags=re.IGNORECASE)
+    m = re.match(
+        r"^(\d{1,2})\s+([a-zA-Z]+)(?:\s+(\d{4}))?$", cleaned.strip()
+    )
+    if not m:
+        m = re.match(
+            r"^([a-zA-Z]+)\s+(\d{1,2})(?:,?\s+(\d{4}))?$", cleaned.strip()
+        )
+        if m:
+            month_name, day_str, year_str = m.group(1), m.group(2), m.group(3)
+        else:
+            month_name = day_str = year_str = None
+    else:
+        day_str, month_name, year_str = m.group(1), m.group(2), m.group(3)
+
+    if month_name:
+        month_key = month_name.lower()
+        month_num = MONTHS.get(month_key)
+        if month_num and day_str.isdigit():
+            day_num = int(day_str)
+            year_num = int(year_str) if year_str else today.year
+            try:
+                candidate = date(year_num, month_num, day_num)
+            except ValueError:
+                return None, (
+                    "❓ That doesn't look like a valid date. "
+                    "Please use a format like '20 June 2026' or 'Tomorrow'."
+                )
+            if not year_str and candidate < today:
+                candidate = candidate.replace(year=candidate.year + 1)
+            return candidate, None
+
+    return None, (
+        "❓ Couldn't understand that date.\n\n"
+        "Please reply with a date like '20 June 2026', '20/06/2026', or 'Tomorrow'."
+    )
+
+
+def validate_future_date(raw_text):
+    """
+    Validate that raw_text represents a real calendar date that is today
+    or later. Returns (is_valid, normalized_str_or_None, error_message_or_None).
+    """
+    parsed, err = parse_job_date(raw_text)
+    if err:
+        return False, None, err
+    today = date.today()
+    if parsed < today:
+        return False, None, (
+            f"❌ That date ({parsed.strftime('%d %B %Y')}) is in the past.\n\n"
+            f"Please enter a future date (today or later), e.g. "
+            f"'{(today.strftime('%d %B %Y'))}' or 'Tomorrow'."
+        )
+    return True, parsed.strftime("%d %B %Y"), None
 
 
 # ── Database helpers ──────────────────────────────────────────────────────────
@@ -586,6 +711,9 @@ async def whatsapp_webhook(
                         f"Date: {job['start_date']}\n\n"
                         f"This job has been cancelled by the farmer. Sorry for the inconvenience."
                     )
+                    print(f"[CANCEL] Notified labourer {labourer_phone} of cancellation for job {job_id}")
+                else:
+                    print(f"[CANCEL] No labourer assigned to job {job_id} — no notification sent")
                 return twiml_response(f"✅ Job #{job_id} has been cancelled.")
 
             # ── Unknown / near-miss command ───────────────────────────────────
@@ -643,11 +771,15 @@ async def whatsapp_webhook(
                 )
             sessions[phone]["job"]["wage"] = raw_body
             sessions[phone]["step"] = "job_date"
-            return twiml_response("When do you need them? (e.g. 20 June, Tomorrow)")
+            return twiml_response("When do you need them? (e.g. 20 June 2026, Tomorrow)")
 
         elif step == "job_date":
+            is_valid, normalized_date, err = validate_future_date(raw_body)
+            if not is_valid:
+                return twiml_response(err)
+
             job = sessions[phone]["job"]
-            job["start_date"] = raw_body
+            job["start_date"] = normalized_date
             farmer = get_from_db("farmers", phone)
             if not farmer:
                 sessions[phone]["step"] = "done"
