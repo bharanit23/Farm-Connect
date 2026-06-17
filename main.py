@@ -354,10 +354,13 @@ async def whatsapp_webhook(
                 msg = "👥 Your Confirmed Jobs:\n\n"
                 for job in jobs:
                     rated = "✅ Rated" if job.get("rated") else "⭐ Not rated"
+                    labourer_phone = job.get("labourer_phone")
+                    labourer = get_from_db("labourers", labourer_phone) if labourer_phone else None
+                    labourer_name = labourer["name"] if labourer else "Unknown"
                     msg += (
                         f"ID: {job['id']}\n"
                         f"Work: {job['work_type']} | Date: {job['start_date']}\n"
-                        f"Labourer: {job.get('labourer_phone', 'Unknown')}\n"
+                        f"Labourer: {labourer_name}\n"
                         f"Status: {rated}\n\n"
                     )
                 msg += "Reply RATE [job_id] [1-5] to rate a labourer."
