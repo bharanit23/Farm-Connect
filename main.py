@@ -16,7 +16,7 @@ app = FastAPI()
 # ── Keep-alive: prevents Render free tier from spinning down ──────────────────
 def keep_alive():
     while True:
-        time.sleep(840)  # every 14 minutes
+        time.sleep(840)
         try:
             req.get("https://farm-connect-yjg8.onrender.com/", timeout=10)
             print("[KEEP-ALIVE] Pinged successfully")
@@ -145,6 +145,23 @@ def get_labourers_by_location(location):
         return []
 
 
+def get_confirmed_jobs_for_farmer(phone):
+    try:
+        encoded_phone = quote(phone, safe="")
+        url = (
+            f"{SUPABASE_URL}/rest/v1/jobs"
+            f"?farmer_phone=eq.{encoded_phone}"
+            f"&status=eq.confirmed"
+            f"&order=start_date.desc&limit=10"
+        )
+        res = req.get(url, headers=HEADERS, timeout=10)
+        res.raise_for_status()
+        return res.json() if isinstance(res.json(), list) else []
+    except Exception as e:
+        print(f"[DB] get_confirmed_jobs_for_farmer ERROR: {e}")
+        return []
+
+
 # ── Twilio helpers ────────────────────────────────────────────────────────────
 
 def send_whatsapp(to, message):
@@ -216,7 +233,8 @@ async def whatsapp_webhook(
                     f"Welcome back {farmer['name']}! 🌾\n\n"
                     f"Reply:\n"
                     f"POST JOB — Post a new job\n"
-                    f"MY JOBS — View your posted jobs"
+                    f"MY JOBS — View your posted jobs\n"
+                    f"MY LABOURERS — See confirmed jobs & rate labourers"
                 )
             labourer = get_from_db("labourers", phone)
             if labourer:
@@ -326,6 +344,68 @@ async def whatsapp_webhook(
                     "(e.g. Harvesting, Planting, Irrigation, Weeding)"
                 )
 
+            elif message == "MY LABOURERS":
+                farmer = get_from_db("farmers", phone)
+                if not farmer:
+                    return twiml_response("❌ Only farmers can use this command.")
+                jobs = get_confirmed_jobs_for_farmer(phone)
+                if not jobs:
+                    return twiml_response("No confirmed jobs found.\nReply POST JOB to post one.")
+                msg = "👥 Your Confirmed Jobs:\n\n"
+                for job in jobs:
+                    rated = "✅ Rated" if job.get("rated") else "⭐ Not rated"
+                    msg += (
+                        f"ID: {job['id']}\n"
+                        f"Work: {job['work_type']} | Date: {job['start_date']}\n"
+                        f"Labourer: {job.get('labourer_phone', 'Unknown')}\n"
+                        f"Status: {rated}\n\n"
+                    )
+                msg += "Reply RATE [job_id] [1-5] to rate a labourer."
+                return twiml_response(msg)
+
+            elif message.startswith("RATE"):
+                parts = raw_body.split()
+                if len(parts) != 3 or not parts[2].isdigit():
+                    return twiml_response("Format: RATE [job_id] [stars 1-5]\nExample: RATE 12 5")
+                job_id, stars = parts[1], int(parts[2])
+                if stars < 1 or stars > 5:
+                    return twiml_response("Stars must be between 1 and 5.")
+                farmer = get_from_db("farmers", phone)
+                if not farmer:
+                    return twiml_response("❌ Only farmers can rate labourers.")
+                try:
+                    url = f"{SUPABASE_URL}/rest/v1/jobs?id=eq.{job_id}&farmer_phone=eq.{quote(phone, safe='')}"
+                    res = req.get(url, headers=HEADERS, timeout=10)
+                    jobs = res.json()
+                except Exception:
+                    return twiml_response("❌ Could not fetch job. Try again.")
+                if not jobs:
+                    return twiml_response("❌ Job not found or doesn't belong to you.")
+                job = jobs[0]
+                if job.get("rated"):
+                    return twiml_response("You've already rated this job.")
+                if job["status"] != "confirmed":
+                    return twiml_response("❌ Can only rate confirmed jobs.")
+                labourer_phone = job.get("labourer_phone")
+                if not labourer_phone:
+                    return twiml_response("❌ No labourer assigned to this job.")
+                labourer = get_from_db("labourers", labourer_phone)
+                if not labourer:
+                    return twiml_response("❌ Labourer not found.")
+                old_total = labourer.get("total_ratings", 0)
+                old_rating = labourer.get("rating", 0)
+                new_total = old_total + 1
+                new_rating = round(((old_rating * old_total) + stars) / new_total, 1)
+                update_db("labourers", {"phone": labourer_phone}, {
+                    "rating": new_rating,
+                    "total_ratings": new_total
+                })
+                update_db("jobs", {"id": job_id}, {"rated": True})
+                return twiml_response(
+                    f"✅ Rated {labourer['name']} — {stars} stars!\n"
+                    f"Their new rating: {new_rating}⭐ ({new_total} ratings)"
+                )
+
             elif message == "MY JOBS":
                 farmer = get_from_db("farmers", phone)
                 if not farmer:
@@ -426,7 +506,8 @@ async def whatsapp_webhook(
                         f"Hello {farmer['name']}! 🌾\n\n"
                         f"Reply:\n"
                         f"POST JOB — Post a new job\n"
-                        f"MY JOBS — View your posted jobs"
+                        f"MY JOBS — View your posted jobs\n"
+                        f"MY LABOURERS — See confirmed jobs & rate labourers"
                     )
                 labourer = get_from_db("labourers", phone)
                 if labourer:
