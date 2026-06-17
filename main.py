@@ -449,9 +449,9 @@ async def whatsapp_webhook(
 
             elif message.startswith("CONFIRM"):
                 parts = raw_body.split()
-                if len(parts) < 2:
+                if len(parts) < 2 or not parts[1].isdigit():
                     return twiml_response(
-                        "Please reply CONFIRM followed by job ID.\nExample: CONFIRM 1"
+                        "Please reply CONFIRM followed by a valid job ID.\nExample: CONFIRM 1"
                     )
                 job_id = parts[1]
                 labourer = get_from_db("labourers", phone)
@@ -485,9 +485,9 @@ async def whatsapp_webhook(
 
             elif message.startswith("CANCEL"):
                 parts = raw_body.split()
-                if len(parts) < 2:
+                if len(parts) < 2 or not parts[1].isdigit():
                     return twiml_response(
-                        "Please reply CANCEL followed by job ID.\nExample: CANCEL 1"
+                        "Please reply CANCEL followed by a valid job ID.\nExample: CANCEL 1"
                     )
                 job_id = parts[1]
                 updated = update_db(
@@ -497,6 +497,17 @@ async def whatsapp_webhook(
                 )
                 if not updated:
                     return twiml_response("❌ Job not found or you don't own this job.")
+                job = updated[0]
+                labourer_phone = job.get("labourer_phone")
+                if labourer_phone:
+                    send_whatsapp(
+                        labourer_phone,
+                        f"⚠️ Job Cancelled\n\n"
+                        f"Work: {job['work_type']}\n"
+                        f"Location: {job['location']}\n"
+                        f"Date: {job['start_date']}\n\n"
+                        f"This job has been cancelled by the farmer. Sorry for the inconvenience."
+                    )
                 return twiml_response(f"✅ Job #{job_id} has been cancelled.")
 
             else:
