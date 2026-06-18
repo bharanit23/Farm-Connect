@@ -304,6 +304,32 @@ def send_whatsapp(to, message):
     except Exception as e:
         print(f"[TWILIO] ERROR sending to {to}: {e}")
 
+def notify_nearby_users_about_equipment(equipment):
+    location = equipment["location"]
+    farmers  = get_labourers_by_location(location)  # reuse location search
+    try:
+        encoded_location = quote(f"%{location}%", safe="")
+        url = f"{SUPABASE_URL}/rest/v1/farmers?location=ilike.{encoded_location}"
+        res = req.get(url, headers=HEADERS, timeout=10)
+        res.raise_for_status()
+        farmers = res.json() if isinstance(res.json(), list) else []
+    except Exception as e:
+        print(f"[NOTIFY] get farmers ERROR: {e}")
+        farmers = []
+    labourers = get_labourers_by_location(location)
+    all_users = farmers + labourers
+    print(f"[NOTIFY] Notifying {len(all_users)} user(s) about equipment in {location}")
+    for user in all_users:
+        if user.get("phone") != equipment.get("owner_phone"):
+            send_whatsapp(
+                user["phone"],
+                f"🚜 Equipment Available for Rent Near You in {location}!\n\n"
+                f"🔧 Equipment: {equipment['name']}\n"
+                f"💰 Rent: ₹{equipment['rent_per_day']}/day\n"
+                f"📅 Available until: {equipment.get('available_until') or 'Ongoing'}\n\n"
+                f"Reply VIEW EQUIPMENT to see all listings."
+            )
+
 def notify_nearby_labourers(job):
     labourers = get_labourers_by_location(job["location"])
     print(f"[NOTIFY] Found {len(labourers)} labourer(s) near {job['location']}")
@@ -784,6 +810,7 @@ def handle_message(phone: str, raw_body: str) -> str:
         sessions[phone]["step"] = "done"
         if not saved:
             return "⚠️ Error listing your equipment. Please try again by sending RENT EQUIPMENT."
+        notify_nearby_users_about_equipment(saved)
         return (
             f"✅ Equipment Listed!\n\n"
             f"🚜 Equipment: {equip['name']}\n"
