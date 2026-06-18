@@ -62,17 +62,21 @@ def _edit_distance(a, b):
 KNOWN_COMMANDS = [
     "POST JOB", "MY JOBS", "MY LABOURERS", "VIEW JOBS",
     "CONFIRM", "CANCEL", "RATE",
+    "LIST EQUIPMENT", "VIEW EQUIPMENT", "MY EQUIPMENT",
 ]
 
 def fuzzy_suggestion(message, threshold=2):
     HINTS = {
-        "RATE":         "Format: RATE [job_id] [stars 1–5]  •  Example: RATE 12 5",
-        "CANCEL":       "Format: CANCEL [job_id]  •  Example: CANCEL 7",
-        "CONFIRM":      "Format: CONFIRM [job_id]  •  Example: CONFIRM 3",
-        "POST JOB":     "Just send: POST JOB",
-        "MY JOBS":      "Just send: MY JOBS",
-        "MY LABOURERS": "Just send: MY LABOURERS",
-        "VIEW JOBS":    "Just send: VIEW JOBS",
+        "RATE":           "Format: RATE [job_id] [stars 1–5]  •  Example: RATE 12 5",
+        "CANCEL":         "Format: CANCEL [job_id]  •  Example: CANCEL 7",
+        "CONFIRM":        "Format: CONFIRM [job_id]  •  Example: CONFIRM 3",
+        "POST JOB":       "Just send: POST JOB",
+        "MY JOBS":        "Just send: MY JOBS",
+        "MY LABOURERS":   "Just send: MY LABOURERS",
+        "VIEW JOBS":      "Just send: VIEW JOBS",
+        "LIST EQUIPMENT": "Just send: LIST EQUIPMENT",
+        "VIEW EQUIPMENT": "Just send: VIEW EQUIPMENT",
+        "MY EQUIPMENT":   "Just send: MY EQUIPMENT",
     }
     for cmd in KNOWN_COMMANDS:
         if message.startswith(cmd) and message != cmd:
@@ -262,6 +266,34 @@ def get_confirmed_jobs_for_farmer(phone):
         print(f"[DB] get_confirmed_jobs_for_farmer ERROR: {e}")
         return []
 
+# ── Equipment DB helpers ──────────────────────────────────────────────────────
+def save_equipment(data):
+    return save_to_db("equipment", data)
+
+def get_equipment_by_owner(phone):
+    try:
+        encoded_phone = quote(phone, safe="")
+        url = (f"{SUPABASE_URL}/rest/v1/equipment"
+               f"?owner_phone=eq.{encoded_phone}&order=created_at.desc&limit=10")
+        res = req.get(url, headers=HEADERS, timeout=10)
+        res.raise_for_status()
+        return res.json() if isinstance(res.json(), list) else []
+    except Exception as e:
+        print(f"[DB] get_equipment_by_owner ERROR: {e}")
+        return []
+
+def get_equipment_by_location(location):
+    try:
+        encoded_location = quote(f"%{location}%", safe="")
+        url = (f"{SUPABASE_URL}/rest/v1/equipment"
+               f"?location=ilike.{encoded_location}&available=eq.true&limit=10")
+        res = req.get(url, headers=HEADERS, timeout=10)
+        res.raise_for_status()
+        return res.json() if isinstance(res.json(), list) else []
+    except Exception as e:
+        print(f"[DB] get_equipment_by_location ERROR: {e}")
+        return []
+
 # ── Twilio helpers ────────────────────────────────────────────────────────────
 def send_whatsapp(to, message):
     try:
@@ -317,7 +349,9 @@ def handle_message(phone: str, raw_body: str) -> str:
                 f"Reply:\n"
                 f"POST JOB — Post a new job\n"
                 f"MY JOBS — View your posted jobs\n"
-                f"MY LABOURERS — See confirmed jobs & rate labourers"
+                f"MY LABOURERS — See confirmed jobs & rate labourers\n"
+                f"LIST EQUIPMENT — Rent out your equipment\n"
+                f"MY EQUIPMENT — View your equipment listings"
             )
         labourer = get_from_db("labourers", phone)
         if labourer:
@@ -325,7 +359,8 @@ def handle_message(phone: str, raw_body: str) -> str:
             return (
                 f"Welcome back {labourer['name']}! 👋\n\n"
                 f"Reply:\n"
-                f"VIEW JOBS — See available jobs near you"
+                f"VIEW JOBS — See available jobs near you\n"
+                f"VIEW EQUIPMENT — Browse equipment for rent near you"
             )
         sessions[phone]["step"] = "role"
         return (
@@ -575,6 +610,59 @@ def handle_message(phone: str, raw_body: str) -> str:
                 print(f"[CANCEL] No labourer on job {job_id} — no notification")
             return f"✅ Job #{job_id} has been cancelled."
 
+        # ── EQUIPMENT COMMANDS ────────────────────────────────────────────────
+
+        elif message == "LIST EQUIPMENT":
+            farmer = get_from_db("farmers", phone)
+            if not farmer:
+                return "❌ Only registered farmers can list equipment."
+            sessions[phone]["step"] = "equip_name"
+            sessions[phone]["equip"] = {}
+            return (
+                "🚜 Let's list your equipment!\n\n"
+                "What equipment do you want to rent out?\n"
+                "(e.g. Tractor, Rotavator, Sprayer, Thresher)"
+            )
+
+        elif message == "VIEW EQUIPMENT":
+            user = get_from_db("farmers", phone) or get_from_db("labourers", phone)
+            if not user:
+                return "❌ Please register first to view equipment."
+            location = user.get("location", "")
+            items = get_equipment_by_location(location)
+            if not items:
+                return (
+                    f"No equipment available for rent in {location} right now.\n"
+                    f"Check back later!"
+                )
+            msg = f"🚜 Equipment Available in {location}:\n\n"
+            for i, item in enumerate(items):
+                msg += (
+                    f"{i+1}. {item['name']}\n"
+                    f"   💰 ₹{item['rent_per_day']}/day\n"
+                    f"   📅 Available until: {item.get('available_until') or 'Ongoing'}\n\n"
+                )
+            msg += "Contact the owner through your local Farm Connect agent to book."
+            return msg
+
+        elif message == "MY EQUIPMENT":
+            farmer = get_from_db("farmers", phone)
+            if not farmer:
+                return "❌ Only farmers can manage equipment listings."
+            items = get_equipment_by_owner(phone)
+            if not items:
+                return "You haven't listed any equipment yet.\nReply LIST EQUIPMENT to add one."
+            msg = "🚜 Your Equipment Listings:\n\n"
+            for i, item in enumerate(items):
+                status = "✅ Available" if item.get("available") else "❌ Unavailable"
+                msg += (
+                    f"{i+1}. {item['name']}\n"
+                    f"   💰 ₹{item['rent_per_day']}/day | {status}\n"
+                    f"   📅 Until: {item.get('available_until') or 'Ongoing'}\n"
+                    f"   ID: {item['id']}\n\n"
+                )
+            return msg
+
         else:
             suggestion, hint = fuzzy_suggestion(message)
             if suggestion:
@@ -588,13 +676,16 @@ def handle_message(phone: str, raw_body: str) -> str:
                     f"❌ Unknown command.\n\nHello {farmer['name']}! 🌾 Available commands:\n"
                     f"POST JOB — Post a new job\n"
                     f"MY JOBS — View your posted jobs\n"
-                    f"MY LABOURERS — See confirmed jobs & rate labourers"
+                    f"MY LABOURERS — See confirmed jobs & rate labourers\n"
+                    f"LIST EQUIPMENT — Rent out your equipment\n"
+                    f"MY EQUIPMENT — View your equipment listings"
                 )
             labourer = get_from_db("labourers", phone)
             if labourer:
                 return (
                     f"❌ Unknown command.\n\nHello {labourer['name']}! 👋 Available commands:\n"
-                    f"VIEW JOBS — See available jobs near you"
+                    f"VIEW JOBS — See available jobs near you\n"
+                    f"VIEW EQUIPMENT — Browse equipment for rent near you"
                 )
             sessions[phone] = {"step": "start"}
             return (
@@ -657,6 +748,51 @@ def handle_message(phone: str, raw_body: str) -> str:
             f"Notifying nearby labourers now! 🔔"
         )
 
+    # ── EQUIPMENT LISTING FLOW ────────────────────────────────────────────────
+    elif step == "equip_name":
+        sessions[phone]["equip"]["name"] = raw_body
+        sessions[phone]["step"] = "equip_rent"
+        return f"What is the rent per day for your {raw_body}? (in ₹)"
+
+    elif step == "equip_rent":
+        if not raw_body.replace(".", "", 1).isdigit():
+            return "Please enter a valid amount (e.g. 500). What is the rent per day?"
+        sessions[phone]["equip"]["rent_per_day"] = raw_body
+        sessions[phone]["step"] = "equip_available_until"
+        return (
+            "Available until which date?\n"
+            "(e.g. 30 June 2026, Tomorrow, or reply 'ongoing' if no end date)"
+        )
+
+    elif step == "equip_available_until":
+        farmer = get_from_db("farmers", phone)
+        equip  = sessions[phone]["equip"]
+        available_until = None
+        if raw_body.strip().lower() not in ("ongoing", "anytime", "-"):
+            is_valid, normalized_date, err = validate_future_date(raw_body)
+            if not is_valid:
+                return err
+            available_until = normalized_date
+        saved = save_equipment({
+            "owner_phone":     phone,
+            "name":            equip["name"],
+            "rent_per_day":    equip["rent_per_day"],
+            "location":        farmer.get("location", "Unknown"),
+            "available_until": available_until,
+            "available":       True,
+        })
+        sessions[phone]["step"] = "done"
+        if not saved:
+            return "⚠️ Error listing your equipment. Please try again by sending LIST EQUIPMENT."
+        return (
+            f"✅ Equipment Listed!\n\n"
+            f"🚜 Equipment: {equip['name']}\n"
+            f"💰 Rent: ₹{equip['rent_per_day']}/day\n"
+            f"📍 Location: {farmer.get('location', 'Unknown')}\n"
+            f"📅 Available until: {available_until or 'Ongoing'}\n\n"
+            f"Farmers and labourers nearby can now find your equipment!"
+        )
+
     # ── FALLBACK ──────────────────────────────────────────────────────────────
     else:
         print(f"[FLOW] Unknown step '{step}' — resetting")
@@ -677,7 +813,7 @@ def ping():
 def root():
     return {"message": "Farm Connect API is running"}
 
-# ── Twilio webhook (unchanged behaviour) ──────────────────────────────────────
+# ── Twilio webhook ─────────────────────────────────────────────────────────────
 @app.post("/webhook")
 async def whatsapp_webhook(Body: str = Form(...), From: str = Form(...)):
     try:
