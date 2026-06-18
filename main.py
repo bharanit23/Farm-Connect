@@ -840,20 +840,7 @@ async def chat_api(request: Request):
         print(f"[CHAT API] EXCEPTION:\n{traceback.format_exc()}")
         return JSONResponse({"reply": "⚠️ Something went wrong. Please try again."})
 
-# ── Reset session ──────────────────────────────────────────────────────────────
-@app.post("/reset")
-async def reset_session(request: Request):
-    data  = await request.json()
-    phone = data.get("phone", "").strip()
-    if phone in sessions:
-        del sessions[phone]
-        print(f"[RESET] Session cleared for {phone}")
-    return JSONResponse({"status": "reset", "phone": phone})
 
-# ── Web chat UI ────────────────────────────────────────────────────────────────
-@app.get("/test", response_class=HTMLResponse)
-def chat_ui():
-    return """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
