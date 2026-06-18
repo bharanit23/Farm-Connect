@@ -62,7 +62,7 @@ def _edit_distance(a, b):
 KNOWN_COMMANDS = [
     "POST JOB", "MY JOBS", "MY LABOURERS", "VIEW JOBS",
     "CONFIRM", "CANCEL", "RATE",
-    "RENT EQUIPMENT", "VIEW EQUIPMENT", "MY EQUIPMENT", "BOOK EQUIPMENT",
+    "RENT EQUIPMENT", "VIEW EQUIPMENT", "MY EQUIPMENT", "BOOK EQUIPMENT", "CANCEL EQUIPMENT",
 ]
 
 def fuzzy_suggestion(message, threshold=2):
@@ -77,7 +77,8 @@ def fuzzy_suggestion(message, threshold=2):
         "RENT EQUIPMENT": "Just send: RENT EQUIPMENT",
         "VIEW EQUIPMENT": "Just send: VIEW EQUIPMENT",
         "MY EQUIPMENT":   "Just send: MY EQUIPMENT",
-        "BOOK EQUIPMENT": "Format: BOOK EQUIPMENT [id]  •  Example: BOOK EQUIPMENT 3",
+        "BOOK EQUIPMENT":   "Format: BOOK EQUIPMENT [id]  •  Example: BOOK EQUIPMENT 3",
+        "CANCEL EQUIPMENT": "Format: CANCEL EQUIPMENT [id]  •  Example: CANCEL EQUIPMENT 3",
     }
     for cmd in KNOWN_COMMANDS:
         if message.startswith(cmd) and message != cmd:
@@ -389,7 +390,8 @@ def handle_message(phone: str, raw_body: str) -> str:
                 f"MY JOBS — View your posted jobs\n"
                 f"MY LABOURERS — See confirmed jobs & rate labourers\n"
                 f"RENT EQUIPMENT — Rent out your equipment\n"
-                f"MY EQUIPMENT — View your equipment listings"
+                f"MY EQUIPMENT — View your equipment listings\n"
+                f"CANCEL EQUIPMENT [id] — Remove an equipment listing"
             )
         labourer = get_from_db("labourers", phone)
         if labourer:
@@ -732,14 +734,44 @@ def handle_message(phone: str, raw_body: str) -> str:
                 return "You haven't listed any equipment yet.\nReply RENT EQUIPMENT to add one."
             msg = "🚜 Your Equipment Listings:\n\n"
             for i, item in enumerate(items):
-                status = "✅ Available" if item.get("available") else "❌ Unavailable"
+                status = "✅ Available" if item.get("available") else "🔒 Booked"
                 msg += (
                     f"{i+1}. {item['name']}\n"
                     f"   💰 ₹{item['rent_per_day']}/day | {status}\n"
                     f"   📅 Until: {item.get('available_until') or 'Ongoing'}\n"
                     f"   ID: {item['id']}\n\n"
                 )
+            msg += "Reply CANCEL EQUIPMENT [id] to remove a listing."
             return msg
+
+        elif message.startswith("CANCEL EQUIPMENT"):
+            parts = raw_body.split()
+            if len(parts) < 3 or not parts[2].isdigit():
+                return "❓ Couldn't read that.\n\nFormat: CANCEL EQUIPMENT [id]\nExample: CANCEL EQUIPMENT 3"
+            equipment_id = parts[2]
+            item = get_equipment_by_id(equipment_id)
+            if not item:
+                return "❌ Equipment not found."
+            if item.get("owner_phone") != phone:
+                return "❌ You can only cancel your own equipment listings."
+            updated = update_db(
+                "equipment",
+                {"id": equipment_id},
+                {"available": False}
+            )
+            if not updated:
+                return "❌ Could not cancel listing. Please try again."
+            booked_by = item.get("booked_by")
+            if booked_by:
+                send_whatsapp(
+                    booked_by,
+                    f"⚠️ Equipment Booking Cancelled\n\n"
+                    f"🚜 Equipment: {item['name']}\n"
+                    f"📍 Location: {item['location']}\n\n"
+                    f"The owner has cancelled this listing. Sorry for the inconvenience."
+                )
+                print(f"[CANCEL EQUIP] Notified booker {booked_by} for equipment {equipment_id}")
+            return f"✅ Equipment listing #{equipment_id} ({item['name']}) has been cancelled."
 
         else:
             suggestion, hint = fuzzy_suggestion(message)
