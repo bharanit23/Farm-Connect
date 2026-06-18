@@ -62,7 +62,7 @@ def _edit_distance(a, b):
 KNOWN_COMMANDS = [
     "POST JOB", "MY JOBS", "MY LABOURERS", "VIEW JOBS",
     "CONFIRM", "CANCEL", "RATE",
-    "LIST EQUIPMENT", "VIEW EQUIPMENT", "MY EQUIPMENT",
+    "RENT EQUIPMENT", "VIEW EQUIPMENT", "MY EQUIPMENT",
 ]
 
 def fuzzy_suggestion(message, threshold=2):
@@ -74,7 +74,7 @@ def fuzzy_suggestion(message, threshold=2):
         "MY JOBS":        "Just send: MY JOBS",
         "MY LABOURERS":   "Just send: MY LABOURERS",
         "VIEW JOBS":      "Just send: VIEW JOBS",
-        "LIST EQUIPMENT": "Just send: LIST EQUIPMENT",
+        "RENT EQUIPMENT": "Just send: RENT EQUIPMENT",
         "VIEW EQUIPMENT": "Just send: VIEW EQUIPMENT",
         "MY EQUIPMENT":   "Just send: MY EQUIPMENT",
     }
@@ -350,7 +350,7 @@ def handle_message(phone: str, raw_body: str) -> str:
                 f"POST JOB — Post a new job\n"
                 f"MY JOBS — View your posted jobs\n"
                 f"MY LABOURERS — See confirmed jobs & rate labourers\n"
-                f"LIST EQUIPMENT — Rent out your equipment\n"
+                f"RENT EQUIPMENT — Rent out your equipment\n"
                 f"MY EQUIPMENT — View your equipment listings"
             )
         labourer = get_from_db("labourers", phone)
@@ -612,7 +612,7 @@ def handle_message(phone: str, raw_body: str) -> str:
 
         # ── EQUIPMENT COMMANDS ────────────────────────────────────────────────
 
-        elif message == "LIST EQUIPMENT":
+        elif message == "RENT EQUIPMENT":
             farmer = get_from_db("farmers", phone)
             if not farmer:
                 return "❌ Only registered farmers can list equipment."
@@ -651,7 +651,7 @@ def handle_message(phone: str, raw_body: str) -> str:
                 return "❌ Only farmers can manage equipment listings."
             items = get_equipment_by_owner(phone)
             if not items:
-                return "You haven't listed any equipment yet.\nReply LIST EQUIPMENT to add one."
+                return "You haven't listed any equipment yet.\nReply RENT EQUIPMENT to add one."
             msg = "🚜 Your Equipment Listings:\n\n"
             for i, item in enumerate(items):
                 status = "✅ Available" if item.get("available") else "❌ Unavailable"
@@ -677,7 +677,7 @@ def handle_message(phone: str, raw_body: str) -> str:
                     f"POST JOB — Post a new job\n"
                     f"MY JOBS — View your posted jobs\n"
                     f"MY LABOURERS — See confirmed jobs & rate labourers\n"
-                    f"LIST EQUIPMENT — Rent out your equipment\n"
+                    f"RENT EQUIPMENT — Rent out your equipment\n"
                     f"MY EQUIPMENT — View your equipment listings"
                 )
             labourer = get_from_db("labourers", phone)
@@ -783,7 +783,7 @@ def handle_message(phone: str, raw_body: str) -> str:
         })
         sessions[phone]["step"] = "done"
         if not saved:
-            return "⚠️ Error listing your equipment. Please try again by sending LIST EQUIPMENT."
+            return "⚠️ Error listing your equipment. Please try again by sending RENT EQUIPMENT."
         return (
             f"✅ Equipment Listed!\n\n"
             f"🚜 Equipment: {equip['name']}\n"
