@@ -62,7 +62,7 @@ def _edit_distance(a, b):
 KNOWN_COMMANDS = [
     "POST JOB", "MY JOBS", "MY LABOURERS", "VIEW JOBS",
     "CONFIRM", "CANCEL", "RATE",
-    "RENT EQUIPMENT", "VIEW EQUIPMENT", "MY EQUIPMENT",
+    "RENT EQUIPMENT", "VIEW EQUIPMENT", "MY EQUIPMENT", "BOOK EQUIPMENT",
 ]
 
 def fuzzy_suggestion(message, threshold=2):
@@ -77,6 +77,7 @@ def fuzzy_suggestion(message, threshold=2):
         "RENT EQUIPMENT": "Just send: RENT EQUIPMENT",
         "VIEW EQUIPMENT": "Just send: VIEW EQUIPMENT",
         "MY EQUIPMENT":   "Just send: MY EQUIPMENT",
+        "BOOK EQUIPMENT": "Format: BOOK EQUIPMENT [id]  •  Example: BOOK EQUIPMENT 3",
     }
     for cmd in KNOWN_COMMANDS:
         if message.startswith(cmd) and message != cmd:
@@ -282,6 +283,17 @@ def get_equipment_by_owner(phone):
         print(f"[DB] get_equipment_by_owner ERROR: {e}")
         return []
 
+def get_equipment_by_id(equipment_id):
+    try:
+        url = f"{SUPABASE_URL}/rest/v1/equipment?id=eq.{equipment_id}"
+        res = req.get(url, headers=HEADERS, timeout=10)
+        res.raise_for_status()
+        data = res.json()
+        return data[0] if isinstance(data, list) and data else None
+    except Exception as e:
+        print(f"[DB] get_equipment_by_id ERROR: {e}")
+        return None
+
 def get_equipment_by_location(location):
     try:
         encoded_location = quote(f"%{location}%", safe="")
@@ -386,7 +398,8 @@ def handle_message(phone: str, raw_body: str) -> str:
                 f"Welcome back {labourer['name']}! 👋\n\n"
                 f"Reply:\n"
                 f"VIEW JOBS — See available jobs near you\n"
-                f"VIEW EQUIPMENT — Browse equipment for rent near you"
+                f"VIEW EQUIPMENT — Browse equipment for rent near you\n"
+                f"BOOK EQUIPMENT [id] — Book a piece of equipment"
             )
         sessions[phone]["step"] = "role"
         return (
@@ -666,10 +679,49 @@ def handle_message(phone: str, raw_body: str) -> str:
                 msg += (
                     f"{i+1}. {item['name']}\n"
                     f"   💰 ₹{item['rent_per_day']}/day\n"
-                    f"   📅 Available until: {item.get('available_until') or 'Ongoing'}\n\n"
+                    f"   📅 Available until: {item.get('available_until') or 'Ongoing'}\n"
+                    f"   Reply BOOK EQUIPMENT {item['id']} to book\n\n"
                 )
-            msg += "Contact the owner through your local Farm Connect agent to book."
             return msg
+
+        elif message.startswith("BOOK EQUIPMENT"):
+            parts = raw_body.split()
+            if len(parts) < 3 or not parts[2].isdigit():
+                return "❓ Couldn't read that.\n\nFormat: BOOK EQUIPMENT [id]\nExample: BOOK EQUIPMENT 3"
+            equipment_id = parts[2]
+            user = get_from_db("farmers", phone) or get_from_db("labourers", phone)
+            if not user:
+                return "❌ Please register first to book equipment."
+            item = get_equipment_by_id(equipment_id)
+            if not item:
+                return "❌ Equipment not found."
+            if not item.get("available"):
+                return f"❌ Sorry, {item['name']} is no longer available for rent."
+            if item.get("owner_phone") == phone:
+                return "❌ You can't book your own equipment."
+            updated = update_db(
+                "equipment",
+                {"id": equipment_id},
+                {"available": False, "booked_by": phone}
+            )
+            if not updated:
+                return "❌ Could not complete booking. Please try again."
+            send_whatsapp(
+                item["owner_phone"],
+                f"🔔 Equipment Booking Confirmed!\n\n"
+                f"🚜 Equipment: {item['name']}\n"
+                f"👤 Booked by: {user['name']}\n"
+                f"📞 Contact: {phone}\n"
+                f"💰 Rent: ₹{item['rent_per_day']}/day\n\n"
+                f"Please coordinate with them for pickup/delivery."
+            )
+            return (
+                f"✅ Equipment Booked!\n\n"
+                f"🚜 Equipment: {item['name']}\n"
+                f"💰 Rent: ₹{item['rent_per_day']}/day\n"
+                f"📅 Available until: {item.get('available_until') or 'Ongoing'}\n\n"
+                f"The owner has been notified. They will contact you shortly!"
+            )
 
         elif message == "MY EQUIPMENT":
             farmer = get_from_db("farmers", phone)
