@@ -625,7 +625,7 @@ def handle_message(phone: str, raw_body: str) -> str:
                 f"Please arrive on time. Good luck! 💪"
             )
 
-        elif message.startswith("CANCEL"):
+        elif message.startswith("CANCEL") and not message.startswith("CANCEL EQUIPMENT"):
             parts = raw_body.split()
             if len(parts) < 2 or not parts[1].isdigit():
                 return "❓ Couldn't read that.\n\nFormat: CANCEL [job_id]\nExample: CANCEL 7"
