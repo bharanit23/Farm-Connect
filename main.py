@@ -203,6 +203,11 @@ def days_until(d: date) -> str:
     return f"📅 Deadline: {d.strftime('%d %b %Y')}"
 
 # ── Government subsidy schemes ────────────────────────────────────────────────
+# Fields:
+#   start_date / end_date : current window. end_date=None means no fixed deadline.
+#   renewal_note          : shown for evergreen (end_date=None) schemes to clarify
+#                            re-application / review cycle, if any. None = nothing extra shown.
+#   link                   : official portal URL shown as a direct "Apply" link.
 SUBSIDY_SCHEMES = [
     {
         "name": "PM-KISAN",
@@ -210,8 +215,10 @@ SUBSIDY_SCHEMES = [
         "eligibility": "All landholding farmer families (subject to exclusion criteria like income tax payers, government employees in certain categories).",
         "benefit": "₹6,000 per year, paid in 3 installments of ₹2,000 directly to bank account.",
         "how_to_apply": "Apply online at pmkisan.gov.in or visit your nearest Common Service Centre (CSC) with Aadhaar, land records, and bank account details.",
+        "link": "https://pmkisan.gov.in",
         "start_date": date(2019, 2, 24),
         "end_date": None,
+        "renewal_note": "🔁 e-KYC must be renewed yearly to keep receiving installments.",
     },
     {
         "name": "PMFBY – Kharif 2025",
@@ -219,8 +226,10 @@ SUBSIDY_SCHEMES = [
         "eligibility": "All farmers growing notified crops in notified areas, including sharecroppers and tenant farmers.",
         "benefit": "Low premium (2% of sum insured) crop insurance covering losses from natural calamities, pests, and diseases.",
         "how_to_apply": "Apply through your bank, CSC, or pmfby.gov.in before 31 July 2025 (Kharif cutoff).",
+        "link": "https://pmfby.gov.in",
         "start_date": date(2025, 4, 1),
         "end_date": date(2025, 7, 31),
+        "renewal_note": None,
     },
     {
         "name": "PMFBY – Rabi 2025–26",
@@ -228,8 +237,10 @@ SUBSIDY_SCHEMES = [
         "eligibility": "All farmers growing notified Rabi crops.",
         "benefit": "Low premium (1.5% of sum insured) crop insurance covering losses from natural calamities.",
         "how_to_apply": "Apply through your bank, CSC, or pmfby.gov.in before 31 December 2025 (Rabi cutoff).",
+        "link": "https://pmfby.gov.in",
         "start_date": date(2025, 10, 1),
         "end_date": date(2025, 12, 31),
+        "renewal_note": None,
     },
     {
         "name": "KCC (Kisan Credit Card)",
@@ -237,8 +248,10 @@ SUBSIDY_SCHEMES = [
         "eligibility": "Farmers, tenant farmers, sharecroppers, and self-help group members.",
         "benefit": "Short-term loans at subsidized interest rates (4–7%) for crop production, equipment, and allied activities.",
         "how_to_apply": "Apply at any nearby bank branch with land documents and identity proof.",
+        "link": "https://www.myscheme.gov.in/schemes/kcc",
         "start_date": date(1998, 8, 1),
         "end_date": None,
+        "renewal_note": "🔁 Credit limit is reviewed and renewed annually by your bank.",
     },
     {
         "name": "Soil Health Card Scheme",
@@ -246,8 +259,10 @@ SUBSIDY_SCHEMES = [
         "eligibility": "All farmers.",
         "benefit": "Free soil testing every 2 years with crop-wise fertilizer and nutrient recommendations to reduce input costs.",
         "how_to_apply": "Contact your local Krishi Vigyan Kendra (KVK) or agriculture department office to get your soil tested.",
+        "link": "https://soilhealth.dac.gov.in",
         "start_date": date(2015, 2, 19),
         "end_date": None,
+        "renewal_note": "🔁 Re-test and renew your card every 2 years.",
     },
     {
         "name": "MGNREGA",
@@ -255,8 +270,10 @@ SUBSIDY_SCHEMES = [
         "eligibility": "Any rural household willing to do unskilled manual work (relevant for labourers).",
         "benefit": "Guaranteed 100 days of wage employment per year at the notified minimum wage.",
         "how_to_apply": "Register at your local Gram Panchayat to get a Job Card, then apply for work as needed.",
+        "link": "https://nrega.nic.in",
         "start_date": date(2006, 2, 2),
         "end_date": None,
+        "renewal_note": "🔁 100-day work entitlement resets every financial year (April–March).",
     },
     {
         "name": "PM Krishi Sinchayee Yojana (PMKSY)",
@@ -264,8 +281,10 @@ SUBSIDY_SCHEMES = [
         "eligibility": "All farmers; SC/ST and small/marginal farmers get higher subsidy (55%).",
         "benefit": "55% subsidy for small/marginal farmers, 45% for others on drip and sprinkler irrigation systems.",
         "how_to_apply": "Apply through your State Agriculture Department or pmksy.gov.in with land and Aadhaar details.",
+        "link": "https://pmksy.gov.in",
         "start_date": date(2015, 7, 1),
         "end_date": None,
+        "renewal_note": None,
     },
     {
         "name": "National Food Security Mission (NFSM)",
@@ -273,8 +292,10 @@ SUBSIDY_SCHEMES = [
         "eligibility": "Farmers in notified districts growing rice, wheat, pulses, or coarse cereals.",
         "benefit": "Free/subsidised certified seeds, farm machinery, training, and demonstrations.",
         "how_to_apply": "Contact your Block Agriculture Officer or local Krishi Vigyan Kendra (KVK).",
+        "link": "https://nfsm.gov.in",
         "start_date": date(2007, 10, 1),
         "end_date": None,
+        "renewal_note": "🔁 Input support is allocated freshly each crop season — re-check with your KVK.",
     },
     {
         "name": "Tamil Nadu CM's Drought Relief – 2025",
@@ -282,8 +303,10 @@ SUBSIDY_SCHEMES = [
         "eligibility": "Farmers in Tamil Nadu districts declared drought-affected for 2024–25 season.",
         "benefit": "₹2,000 per acre (up to 5 acres) direct bank transfer to eligible farmers.",
         "how_to_apply": "Apply at your Village Administrative Office (VAO) with patta/chitta and bank passbook before 30 September 2025.",
+        "link": "https://www.tn.gov.in",
         "start_date": date(2025, 3, 1),
         "end_date": date(2025, 9, 30),
+        "renewal_note": None,
     },
     {
         "name": "e-NAM (National Agriculture Market)",
@@ -291,8 +314,10 @@ SUBSIDY_SCHEMES = [
         "eligibility": "All farmers with produce registered at a linked APMC mandi.",
         "benefit": "Access to buyers across India, transparent online bidding, and direct bank payment — better prices, no middlemen.",
         "how_to_apply": "Register at enam.gov.in or through your local APMC/mandi office with Aadhaar and bank details.",
+        "link": "https://enam.gov.in",
         "start_date": date(2016, 4, 14),
         "end_date": None,
+        "renewal_note": None,
     },
     {
         "name": "Agri Infrastructure Fund (AIF)",
@@ -300,8 +325,10 @@ SUBSIDY_SCHEMES = [
         "eligibility": "Farmers, FPOs, PACS, SHGs, agri-entrepreneurs for post-harvest infrastructure.",
         "benefit": "Loans up to ₹2 crore at 3% interest subsidy for warehouses, cold storage, processing units.",
         "how_to_apply": "Apply through any scheduled bank or at agriinfra.dac.gov.in with project report and land documents.",
+        "link": "https://agriinfra.dac.gov.in",
         "start_date": date(2020, 8, 9),
         "end_date": None,
+        "renewal_note": None,
     },
     {
         "name": "PM Fasal Bima (PMFBY) – Horticulture TN",
@@ -309,8 +336,10 @@ SUBSIDY_SCHEMES = [
         "eligibility": "Tamil Nadu farmers growing banana, tomato, onion, or other notified horticultural crops.",
         "benefit": "5% premium cap, covers crop loss from drought, flood, pests, and unseasonal rain.",
         "how_to_apply": "Apply at nearest Tamil Nadu Horticulture Department office or through your cooperative bank before season cutoff.",
+        "link": "https://pmfby.gov.in",
         "start_date": date(2025, 6, 1),
         "end_date": date(2025, 8, 31),
+        "renewal_note": None,
     },
 ]
 
@@ -323,11 +352,41 @@ def active_schemes(today: date = None) -> list:
         and (s["end_date"] is None or s["end_date"] >= today)
     ]
 
+def expired_schemes(today: date = None) -> list:
+    """Return schemes whose window has a fixed end_date that has already passed."""
+    today = today or date.today()
+    return [
+        s for s in SUBSIDY_SCHEMES
+        if s["end_date"] is not None and s["end_date"] < today
+    ]
+
 def expiry_tag(scheme: dict) -> str:
     """Return a short urgency tag for schemes with a deadline."""
     if scheme["end_date"] is None:
         return "🟢 Ongoing"
     return days_until(scheme["end_date"])
+
+def next_cycle_estimate(scheme: dict) -> str:
+    """
+    Rough +1 year estimate of when an expired seasonal scheme's next window
+    might open, based on its last known start/end dates. This is NOT an
+    official date — actual cutoffs are notified annually by the government
+    and can shift, so we always tell the user to verify on the portal.
+    """
+    est_start = scheme["start_date"].replace(year=scheme["start_date"].year + 1)
+    est_end   = scheme["end_date"].replace(year=scheme["end_date"].year + 1)
+    return (
+        f"📆 Likely reopens around {est_start.strftime('%b %Y')} "
+        f"(estimate based on last year's cycle — confirm exact dates on the official portal)."
+    )
+
+def renewal_or_deadline_line(scheme: dict) -> str:
+    """Build the line(s) shown under the urgency tag describing deadline/renewal info."""
+    if scheme["end_date"] is None:
+        if scheme.get("renewal_note"):
+            return scheme["renewal_note"]
+        return "🟢 No fixed deadline — apply anytime."
+    return f"📅 Deadline: {scheme['end_date'].strftime('%d %B %Y')}"
 
 # ── Database helpers ──────────────────────────────────────────────────────────
 def save_to_db(table, data):
@@ -1005,12 +1064,21 @@ def handle_message(phone: str, raw_body: str) -> str:
         # ── SUBSIDIES ─────────────────────────────────────────────────────────
         elif message == "SUBSIDIES":
             schemes = active_schemes()
-            if not schemes:
-                return "No government schemes are active right now. Check back later!"
+            expired = expired_schemes()
+            if not schemes and not expired:
+                return "No government schemes are available right now. Check back later!"
             msg = "🏛️ *Active Government Schemes:*\n\n"
             for i, scheme in enumerate(schemes):
                 tag = expiry_tag(scheme)
                 msg += f"{i+1}. 📌 {scheme['name']}\n   {scheme['short']}\n   {tag}\n\n"
+            if not schemes:
+                msg = "No schemes are currently open for application.\n\n"
+            if expired:
+                msg += "─────────────────────\n❌ *Recently Expired:*\n\n"
+                offset = len(schemes)
+                for i, scheme in enumerate(expired):
+                    msg += f"{offset + i + 1}. 📌 {scheme['name']} — ❌ Expired\n"
+                msg += "\n"
             msg += "Reply SUBSIDY [number] for full details.\nExample: SUBSIDY 1"
             return msg
 
@@ -1020,17 +1088,27 @@ def handle_message(phone: str, raw_body: str) -> str:
             if len(parts) < 2 or not parts[1].isdigit():
                 return "❓ Couldn't read that.\n\nFormat: SUBSIDY [number]\nExample: SUBSIDY 2"
             schemes = active_schemes()
+            expired = expired_schemes()
+            combined = schemes + expired
             index = int(parts[1]) - 1
-            if index < 0 or index >= len(schemes):
-                return f"❌ Invalid number. Reply SUBSIDIES to see the list (1–{len(schemes)})."
-            scheme = schemes[index]
-            tag = expiry_tag(scheme)
+            if index < 0 or index >= len(combined):
+                return f"❌ Invalid number. Reply SUBSIDIES to see the list (1–{len(combined)})."
+            scheme = combined[index]
+            is_expired = index >= len(schemes)
+
+            if is_expired:
+                header = f"🏛️ *{scheme['name']}*\n❌ Expired (last cycle ended {scheme['end_date'].strftime('%d %B %Y')})\n\n{next_cycle_estimate(scheme)}\n"
+            else:
+                tag = expiry_tag(scheme)
+                deadline_line = renewal_or_deadline_line(scheme)
+                header = f"🏛️ *{scheme['name']}*\n{tag}\n{deadline_line}\n"
+
             return (
-                f"🏛️ *{scheme['name']}*\n"
-                f"{tag}\n\n"
+                f"{header}\n"
                 f"📋 *Eligibility:*\n{scheme['eligibility']}\n\n"
                 f"💰 *Benefit:*\n{scheme['benefit']}\n\n"
                 f"📝 *How to Apply:*\n{scheme['how_to_apply']}\n\n"
+                f"🔗 *Apply:* {scheme['link']}\n\n"
                 f"Reply SUBSIDIES to see the full list."
             )
 
