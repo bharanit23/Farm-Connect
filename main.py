@@ -203,11 +203,6 @@ def days_until(d: date) -> str:
     return f"📅 Deadline: {d.strftime('%d %b %Y')}"
 
 # ── Government subsidy schemes ────────────────────────────────────────────────
-# Fields:
-#   start_date / end_date : current window. end_date=None means no fixed deadline.
-#   renewal_note          : shown for evergreen (end_date=None) schemes to clarify
-#                            re-application / review cycle, if any. None = nothing extra shown.
-#   link                   : official portal URL shown as a direct "Apply" link.
 SUBSIDY_SCHEMES = [
     {
         "name": "PM-KISAN",
@@ -344,7 +339,6 @@ SUBSIDY_SCHEMES = [
 ]
 
 def active_schemes(today: date = None) -> list:
-    """Return only schemes whose date window includes today."""
     today = today or date.today()
     return [
         s for s in SUBSIDY_SCHEMES
@@ -353,7 +347,6 @@ def active_schemes(today: date = None) -> list:
     ]
 
 def expired_schemes(today: date = None) -> list:
-    """Return schemes whose window has a fixed end_date that has already passed."""
     today = today or date.today()
     return [
         s for s in SUBSIDY_SCHEMES
@@ -361,18 +354,11 @@ def expired_schemes(today: date = None) -> list:
     ]
 
 def expiry_tag(scheme: dict) -> str:
-    """Return a short urgency tag for schemes with a deadline."""
     if scheme["end_date"] is None:
         return "🟢 Ongoing"
     return days_until(scheme["end_date"])
 
 def next_cycle_estimate(scheme: dict) -> str:
-    """
-    Rough +1 year estimate of when an expired seasonal scheme's next window
-    might open, based on its last known start/end dates. This is NOT an
-    official date — actual cutoffs are notified annually by the government
-    and can shift, so we always tell the user to verify on the portal.
-    """
     est_start = scheme["start_date"].replace(year=scheme["start_date"].year + 1)
     est_end   = scheme["end_date"].replace(year=scheme["end_date"].year + 1)
     return (
@@ -381,7 +367,6 @@ def next_cycle_estimate(scheme: dict) -> str:
     )
 
 def renewal_or_deadline_line(scheme: dict) -> str:
-    """Build the line(s) shown under the urgency tag describing deadline/renewal info."""
     if scheme["end_date"] is None:
         if scheme.get("renewal_note"):
             return scheme["renewal_note"]
@@ -602,7 +587,6 @@ def labourer_menu(name: str) -> str:
     )
 
 def welcome_back(phone: str) -> str | None:
-    """Return a menu string if the user is registered, else None."""
     farmer = get_from_db("farmers", phone)
     if farmer:
         return farmer_menu(farmer["name"])
@@ -1422,8 +1406,13 @@ Type any message below or tap a quick reply.
     chat.scrollTop = chat.scrollHeight;
   }
 
+  // Escape HTML first, then turn any https:// URLs into clickable links.
+  // WhatsApp auto-linkifies URLs natively; this does the same for the web UI.
   function escHtml(str) {
-    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    let s = str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    s = s.replace(/(https?:\/\/[^\s<]+)/g,
+      '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#53bdeb;text-decoration:underline;">$1</a>');
+    return s;
   }
 
   function showTyping() {
