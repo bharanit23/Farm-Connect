@@ -63,6 +63,7 @@ KNOWN_COMMANDS = [
     "POST JOB", "MY JOBS", "MY LABOURERS", "VIEW JOBS",
     "CONFIRM", "CANCEL", "RATE",
     "RENT EQUIPMENT", "VIEW EQUIPMENT", "MY EQUIPMENT", "BOOK EQUIPMENT", "CANCEL EQUIPMENT",
+    "SUBSIDIES", "SUBSIDY",
 ]
 
 def fuzzy_suggestion(message, threshold=2):
@@ -79,6 +80,8 @@ def fuzzy_suggestion(message, threshold=2):
         "MY EQUIPMENT":   "Just send: MY EQUIPMENT",
         "BOOK EQUIPMENT":   "Format: BOOK EQUIPMENT [id]  •  Example: BOOK EQUIPMENT 3",
         "CANCEL EQUIPMENT": "Format: CANCEL EQUIPMENT [id]  •  Example: CANCEL EQUIPMENT 3",
+        "SUBSIDIES": "Just send: SUBSIDIES",
+        "SUBSIDY":   "Format: SUBSIDY [number]  •  Example: SUBSIDY 2",
     }
     for cmd in KNOWN_COMMANDS:
         if message.startswith(cmd) and message != cmd:
@@ -177,6 +180,45 @@ def validate_future_date(raw_text):
             f"'{today.strftime('%d %B %Y')}' or 'Tomorrow'."
         )
     return True, parsed.strftime("%d %B %Y"), None
+
+# ── Government subsidy schemes (static reference data) ───────────────────────
+SUBSIDY_SCHEMES = [
+    {
+        "name": "PM-KISAN",
+        "short": "₹6,000/year direct income support for farmers",
+        "eligibility": "All landholding farmer families (subject to exclusion criteria like income tax payers, government employees in certain categories).",
+        "benefit": "₹6,000 per year, paid in 3 installments of ₹2,000 directly to bank account.",
+        "how_to_apply": "Apply online at pmkisan.gov.in or visit your nearest Common Service Centre (CSC) with Aadhaar, land records, and bank account details.",
+    },
+    {
+        "name": "PMFBY (Pradhan Mantri Fasal Bima Yojana)",
+        "short": "Crop insurance scheme for farmers",
+        "eligibility": "All farmers growing notified crops in notified areas, including sharecroppers and tenant farmers.",
+        "benefit": "Low premium crop insurance — covers losses from natural calamities, pests, and diseases.",
+        "how_to_apply": "Apply through your bank, CSC, or the PMFBY portal (pmfby.gov.in) before the cutoff date for your crop season.",
+    },
+    {
+        "name": "KCC (Kisan Credit Card)",
+        "short": "Easy credit access for farming needs",
+        "eligibility": "Farmers, tenant farmers, sharecroppers, and self-help group members.",
+        "benefit": "Short-term loans at subsidized interest rates for crop production, equipment, and allied activities.",
+        "how_to_apply": "Apply at any nearby bank branch with land documents and identity proof.",
+    },
+    {
+        "name": "Soil Health Card Scheme",
+        "short": "Free soil testing and nutrient advice",
+        "eligibility": "All farmers.",
+        "benefit": "Free soil testing every 2 years with crop-wise fertilizer and nutrient recommendations.",
+        "how_to_apply": "Contact your local Krishi Vigyan Kendra (KVK) or agriculture department office to get your soil tested.",
+    },
+    {
+        "name": "MGNREGA",
+        "short": "100 days guaranteed rural employment",
+        "eligibility": "Any rural household willing to do unskilled manual work (relevant for labourers).",
+        "benefit": "Guaranteed 100 days of wage employment per year at the notified minimum wage.",
+        "how_to_apply": "Register at your local Gram Panchayat to get a Job Card, then apply for work as needed.",
+    },
+]
 
 # ── Database helpers ──────────────────────────────────────────────────────────
 def save_to_db(table, data):
@@ -391,7 +433,8 @@ def handle_message(phone: str, raw_body: str) -> str:
                 f"MY LABOURERS — See confirmed jobs & rate labourers\n"
                 f"RENT EQUIPMENT — Rent out your equipment\n"
                 f"MY EQUIPMENT — View your equipment listings\n"
-                f"CANCEL EQUIPMENT [id] — Remove an equipment listing"
+                f"CANCEL EQUIPMENT [id] — Remove an equipment listing\n"
+                f"SUBSIDIES — View government schemes"
             )
         labourer = get_from_db("labourers", phone)
         if labourer:
@@ -401,7 +444,8 @@ def handle_message(phone: str, raw_body: str) -> str:
                 f"Reply:\n"
                 f"VIEW JOBS — See available jobs near you\n"
                 f"VIEW EQUIPMENT — Browse equipment for rent near you\n"
-                f"BOOK EQUIPMENT [id] — Book a piece of equipment"
+                f"BOOK EQUIPMENT [id] — Book a piece of equipment\n"
+                f"SUBSIDIES — View government schemes"
             )
         sessions[phone]["step"] = "role"
         return (
@@ -773,6 +817,31 @@ def handle_message(phone: str, raw_body: str) -> str:
                 print(f"[CANCEL EQUIP] Notified booker {booked_by} for equipment {equipment_id}")
             return f"✅ Equipment listing #{equipment_id} ({item['name']}) has been cancelled."
 
+        # ── SUBSIDY COMMANDS ──────────────────────────────────────────────────
+
+        elif message == "SUBSIDIES":
+            msg = "🏛️ Government Schemes Available:\n\n"
+            for i, scheme in enumerate(SUBSIDY_SCHEMES):
+                msg += f"{i+1}. {scheme['name']}\n   {scheme['short']}\n\n"
+            msg += "Reply SUBSIDY [number] for full details.\nExample: SUBSIDY 1"
+            return msg
+
+        elif message.startswith("SUBSIDY"):
+            parts = raw_body.split()
+            if len(parts) < 2 or not parts[1].isdigit():
+                return "❓ Couldn't read that.\n\nFormat: SUBSIDY [number]\nExample: SUBSIDY 2"
+            index = int(parts[1]) - 1
+            if index < 0 or index >= len(SUBSIDY_SCHEMES):
+                return f"❌ Invalid number. Reply SUBSIDIES to see the list (1-{len(SUBSIDY_SCHEMES)})."
+            scheme = SUBSIDY_SCHEMES[index]
+            return (
+                f"🏛️ {scheme['name']}\n\n"
+                f"📋 Eligibility:\n{scheme['eligibility']}\n\n"
+                f"💰 Benefit:\n{scheme['benefit']}\n\n"
+                f"📝 How to Apply:\n{scheme['how_to_apply']}\n\n"
+                f"Reply SUBSIDIES to see the full list."
+            )
+
         else:
             suggestion, hint = fuzzy_suggestion(message)
             if suggestion:
@@ -788,14 +857,16 @@ def handle_message(phone: str, raw_body: str) -> str:
                     f"MY JOBS — View your posted jobs\n"
                     f"MY LABOURERS — See confirmed jobs & rate labourers\n"
                     f"RENT EQUIPMENT — Rent out your equipment\n"
-                    f"MY EQUIPMENT — View your equipment listings"
+                    f"MY EQUIPMENT — View your equipment listings\n"
+                    f"SUBSIDIES — View government schemes"
                 )
             labourer = get_from_db("labourers", phone)
             if labourer:
                 return (
                     f"❌ Unknown command.\n\nHello {labourer['name']}! 👋 Available commands:\n"
                     f"VIEW JOBS — See available jobs near you\n"
-                    f"VIEW EQUIPMENT — Browse equipment for rent near you"
+                    f"VIEW EQUIPMENT — Browse equipment for rent near you\n"
+                    f"SUBSIDIES — View government schemes"
                 )
             sessions[phone] = {"step": "start"}
             return (
