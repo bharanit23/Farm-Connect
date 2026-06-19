@@ -49,6 +49,14 @@ HEADERS = {
 
 sessions = {}
 
+# ── Greeting keywords ─────────────────────────────────────────────────────────
+GREETINGS = {
+    "HI", "HELLO", "HEY", "HELP", "START", "MENU",
+    "VANAKKAM", "NAMASTE", "HAI", "HELO", "VANAKAM",
+    "GOOD MORNING", "GOOD AFTERNOON", "GOOD EVENING",
+    "GM", "SUP", "YO", "HOWDY"
+}
+
 # ── Fuzzy near-miss helper ────────────────────────────────────────────────────
 def _edit_distance(a, b):
     dp = list(range(len(b) + 1))
@@ -68,20 +76,20 @@ KNOWN_COMMANDS = [
 
 def fuzzy_suggestion(message, threshold=2):
     HINTS = {
-        "RATE":           "Format: RATE [job_id] [stars 1–5]  •  Example: RATE 12 5",
-        "CANCEL":         "Format: CANCEL [job_id]  •  Example: CANCEL 7",
-        "CONFIRM":        "Format: CONFIRM [job_id]  •  Example: CONFIRM 3",
-        "POST JOB":       "Just send: POST JOB",
-        "MY JOBS":        "Just send: MY JOBS",
-        "MY LABOURERS":   "Just send: MY LABOURERS",
-        "VIEW JOBS":      "Just send: VIEW JOBS",
-        "RENT EQUIPMENT": "Just send: RENT EQUIPMENT",
-        "VIEW EQUIPMENT": "Just send: VIEW EQUIPMENT",
-        "MY EQUIPMENT":   "Just send: MY EQUIPMENT",
+        "RATE":             "Format: RATE [job_id] [stars 1–5]  •  Example: RATE 12 5",
+        "CANCEL":           "Format: CANCEL [job_id]  •  Example: CANCEL 7",
+        "CONFIRM":          "Format: CONFIRM [job_id]  •  Example: CONFIRM 3",
+        "POST JOB":         "Just send: POST JOB",
+        "MY JOBS":          "Just send: MY JOBS",
+        "MY LABOURERS":     "Just send: MY LABOURERS",
+        "VIEW JOBS":        "Just send: VIEW JOBS",
+        "RENT EQUIPMENT":   "Just send: RENT EQUIPMENT",
+        "VIEW EQUIPMENT":   "Just send: VIEW EQUIPMENT",
+        "MY EQUIPMENT":     "Just send: MY EQUIPMENT",
         "BOOK EQUIPMENT":   "Format: BOOK EQUIPMENT [id]  •  Example: BOOK EQUIPMENT 3",
         "CANCEL EQUIPMENT": "Format: CANCEL EQUIPMENT [id]  •  Example: CANCEL EQUIPMENT 3",
-        "SUBSIDIES": "Just send: SUBSIDIES",
-        "SUBSIDY":   "Format: SUBSIDY [number]  •  Example: SUBSIDY 2",
+        "SUBSIDIES":        "Just send: SUBSIDIES",
+        "SUBSIDY":          "Format: SUBSIDY [number]  •  Example: SUBSIDY 2",
     }
     for cmd in KNOWN_COMMANDS:
         if message.startswith(cmd) and message != cmd:
@@ -181,7 +189,20 @@ def validate_future_date(raw_text):
         )
     return True, parsed.strftime("%d %B %Y"), None
 
-# ── Government subsidy schemes (static reference data) ───────────────────────
+# ── Days-until helper for subsidy deadlines ───────────────────────────────────
+def days_until(d: date) -> str:
+    delta = (d - date.today()).days
+    if delta < 0:
+        return "expired"
+    if delta == 0:
+        return "⚠️ Last day today!"
+    if delta <= 7:
+        return f"⚠️ Only {delta} day{'s' if delta != 1 else ''} left!"
+    if delta <= 30:
+        return f"🔔 {delta} days left"
+    return f"📅 Deadline: {d.strftime('%d %b %Y')}"
+
+# ── Government subsidy schemes ────────────────────────────────────────────────
 SUBSIDY_SCHEMES = [
     {
         "name": "PM-KISAN",
@@ -189,27 +210,44 @@ SUBSIDY_SCHEMES = [
         "eligibility": "All landholding farmer families (subject to exclusion criteria like income tax payers, government employees in certain categories).",
         "benefit": "₹6,000 per year, paid in 3 installments of ₹2,000 directly to bank account.",
         "how_to_apply": "Apply online at pmkisan.gov.in or visit your nearest Common Service Centre (CSC) with Aadhaar, land records, and bank account details.",
+        "start_date": date(2019, 2, 24),
+        "end_date": None,
     },
     {
-        "name": "PMFBY (Pradhan Mantri Fasal Bima Yojana)",
-        "short": "Crop insurance scheme for farmers",
+        "name": "PMFBY – Kharif 2025",
+        "short": "Crop insurance for Kharif 2025 season",
         "eligibility": "All farmers growing notified crops in notified areas, including sharecroppers and tenant farmers.",
-        "benefit": "Low premium crop insurance — covers losses from natural calamities, pests, and diseases.",
-        "how_to_apply": "Apply through your bank, CSC, or the PMFBY portal (pmfby.gov.in) before the cutoff date for your crop season.",
+        "benefit": "Low premium (2% of sum insured) crop insurance covering losses from natural calamities, pests, and diseases.",
+        "how_to_apply": "Apply through your bank, CSC, or pmfby.gov.in before 31 July 2025 (Kharif cutoff).",
+        "start_date": date(2025, 4, 1),
+        "end_date": date(2025, 7, 31),
+    },
+    {
+        "name": "PMFBY – Rabi 2025–26",
+        "short": "Crop insurance for Rabi 2025–26 season",
+        "eligibility": "All farmers growing notified Rabi crops.",
+        "benefit": "Low premium (1.5% of sum insured) crop insurance covering losses from natural calamities.",
+        "how_to_apply": "Apply through your bank, CSC, or pmfby.gov.in before 31 December 2025 (Rabi cutoff).",
+        "start_date": date(2025, 10, 1),
+        "end_date": date(2025, 12, 31),
     },
     {
         "name": "KCC (Kisan Credit Card)",
-        "short": "Easy credit access for farming needs",
+        "short": "Easy credit access for farming needs at low interest",
         "eligibility": "Farmers, tenant farmers, sharecroppers, and self-help group members.",
-        "benefit": "Short-term loans at subsidized interest rates for crop production, equipment, and allied activities.",
+        "benefit": "Short-term loans at subsidized interest rates (4–7%) for crop production, equipment, and allied activities.",
         "how_to_apply": "Apply at any nearby bank branch with land documents and identity proof.",
+        "start_date": date(1998, 8, 1),
+        "end_date": None,
     },
     {
         "name": "Soil Health Card Scheme",
-        "short": "Free soil testing and nutrient advice",
+        "short": "Free soil testing and crop-wise nutrient advice",
         "eligibility": "All farmers.",
-        "benefit": "Free soil testing every 2 years with crop-wise fertilizer and nutrient recommendations.",
+        "benefit": "Free soil testing every 2 years with crop-wise fertilizer and nutrient recommendations to reduce input costs.",
         "how_to_apply": "Contact your local Krishi Vigyan Kendra (KVK) or agriculture department office to get your soil tested.",
+        "start_date": date(2015, 2, 19),
+        "end_date": None,
     },
     {
         "name": "MGNREGA",
@@ -217,8 +255,79 @@ SUBSIDY_SCHEMES = [
         "eligibility": "Any rural household willing to do unskilled manual work (relevant for labourers).",
         "benefit": "Guaranteed 100 days of wage employment per year at the notified minimum wage.",
         "how_to_apply": "Register at your local Gram Panchayat to get a Job Card, then apply for work as needed.",
+        "start_date": date(2006, 2, 2),
+        "end_date": None,
+    },
+    {
+        "name": "PM Krishi Sinchayee Yojana (PMKSY)",
+        "short": "Subsidy on drip & sprinkler irrigation systems",
+        "eligibility": "All farmers; SC/ST and small/marginal farmers get higher subsidy (55%).",
+        "benefit": "55% subsidy for small/marginal farmers, 45% for others on drip and sprinkler irrigation systems.",
+        "how_to_apply": "Apply through your State Agriculture Department or pmksy.gov.in with land and Aadhaar details.",
+        "start_date": date(2015, 7, 1),
+        "end_date": None,
+    },
+    {
+        "name": "National Food Security Mission (NFSM)",
+        "short": "Free certified seeds & input support for key crops",
+        "eligibility": "Farmers in notified districts growing rice, wheat, pulses, or coarse cereals.",
+        "benefit": "Free/subsidised certified seeds, farm machinery, training, and demonstrations.",
+        "how_to_apply": "Contact your Block Agriculture Officer or local Krishi Vigyan Kendra (KVK).",
+        "start_date": date(2007, 10, 1),
+        "end_date": None,
+    },
+    {
+        "name": "Tamil Nadu CM's Drought Relief – 2025",
+        "short": "One-time ₹2,000/acre relief for drought-affected TN farmers",
+        "eligibility": "Farmers in Tamil Nadu districts declared drought-affected for 2024–25 season.",
+        "benefit": "₹2,000 per acre (up to 5 acres) direct bank transfer to eligible farmers.",
+        "how_to_apply": "Apply at your Village Administrative Office (VAO) with patta/chitta and bank passbook before 30 September 2025.",
+        "start_date": date(2025, 3, 1),
+        "end_date": date(2025, 9, 30),
+    },
+    {
+        "name": "e-NAM (National Agriculture Market)",
+        "short": "Sell crops online directly to buyers across India",
+        "eligibility": "All farmers with produce registered at a linked APMC mandi.",
+        "benefit": "Access to buyers across India, transparent online bidding, and direct bank payment — better prices, no middlemen.",
+        "how_to_apply": "Register at enam.gov.in or through your local APMC/mandi office with Aadhaar and bank details.",
+        "start_date": date(2016, 4, 14),
+        "end_date": None,
+    },
+    {
+        "name": "Agri Infrastructure Fund (AIF)",
+        "short": "Low-interest loans for farm storage & processing",
+        "eligibility": "Farmers, FPOs, PACS, SHGs, agri-entrepreneurs for post-harvest infrastructure.",
+        "benefit": "Loans up to ₹2 crore at 3% interest subsidy for warehouses, cold storage, processing units.",
+        "how_to_apply": "Apply through any scheduled bank or at agriinfra.dac.gov.in with project report and land documents.",
+        "start_date": date(2020, 8, 9),
+        "end_date": None,
+    },
+    {
+        "name": "PM Fasal Bima (PMFBY) – Horticulture TN",
+        "short": "Crop insurance for banana, tomato, onion (TN)",
+        "eligibility": "Tamil Nadu farmers growing banana, tomato, onion, or other notified horticultural crops.",
+        "benefit": "5% premium cap, covers crop loss from drought, flood, pests, and unseasonal rain.",
+        "how_to_apply": "Apply at nearest Tamil Nadu Horticulture Department office or through your cooperative bank before season cutoff.",
+        "start_date": date(2025, 6, 1),
+        "end_date": date(2025, 8, 31),
     },
 ]
+
+def active_schemes(today: date = None) -> list:
+    """Return only schemes whose date window includes today."""
+    today = today or date.today()
+    return [
+        s for s in SUBSIDY_SCHEMES
+        if s["start_date"] <= today
+        and (s["end_date"] is None or s["end_date"] >= today)
+    ]
+
+def expiry_tag(scheme: dict) -> str:
+    """Return a short urgency tag for schemes with a deadline."""
+    if scheme["end_date"] is None:
+        return "🟢 Ongoing"
+    return days_until(scheme["end_date"])
 
 # ── Database helpers ──────────────────────────────────────────────────────────
 def save_to_db(table, data):
@@ -361,7 +470,7 @@ def send_whatsapp(to, message):
 
 def notify_nearby_users_about_equipment(equipment):
     location = equipment["location"]
-    farmers  = get_labourers_by_location(location)  # reuse location search
+    farmers  = []
     try:
         encoded_location = quote(f"%{location}%", safe="")
         url = f"{SUPABASE_URL}/rest/v1/farmers?location=ilike.{encoded_location}"
@@ -370,7 +479,6 @@ def notify_nearby_users_about_equipment(equipment):
         farmers = res.json() if isinstance(res.json(), list) else []
     except Exception as e:
         print(f"[NOTIFY] get farmers ERROR: {e}")
-        farmers = []
     labourers = get_labourers_by_location(location)
     all_users = farmers + labourers
     print(f"[NOTIFY] Notifying {len(all_users)} user(s) about equipment in {location}")
@@ -406,10 +514,48 @@ def twiml_response(text):
     r.message(text)
     return Response(content=str(r), media_type="application/xml")
 
-# ── Core message handler (returns plain text string) ─────────────────────────
+# ── Menu helpers ──────────────────────────────────────────────────────────────
+def farmer_menu(name: str) -> str:
+    return (
+        f"Hello {name}! 🌾 How can I help you today?\n\n"
+        f"╔══════════════════════╗\n"
+        f"║  🌾 FARMER MENU      ║\n"
+        f"╚══════════════════════╝\n\n"
+        f"📋 POST JOB — Post a new job\n"
+        f"📂 MY JOBS — View your posted jobs\n"
+        f"👥 MY LABOURERS — Confirmed jobs & rate\n"
+        f"🚜 RENT EQUIPMENT — List equipment for rent\n"
+        f"🔧 MY EQUIPMENT — View your listings\n"
+        f"🏛️ SUBSIDIES — Government schemes\n\n"
+        f"💡 Tip: Send HELP anytime to see this menu."
+    )
+
+def labourer_menu(name: str) -> str:
+    return (
+        f"Hello {name}! 👋 How can I help you today?\n\n"
+        f"╔══════════════════════╗\n"
+        f"║  👷 LABOURER MENU    ║\n"
+        f"╚══════════════════════╝\n\n"
+        f"🔍 VIEW JOBS — See jobs near you\n"
+        f"🚜 VIEW EQUIPMENT — Browse equipment for rent\n"
+        f"🏛️ SUBSIDIES — Government schemes\n\n"
+        f"💡 Tip: Send HELP anytime to see this menu."
+    )
+
+def welcome_back(phone: str) -> str | None:
+    """Return a menu string if the user is registered, else None."""
+    farmer = get_from_db("farmers", phone)
+    if farmer:
+        return farmer_menu(farmer["name"])
+    labourer = get_from_db("labourers", phone)
+    if labourer:
+        return labourer_menu(labourer["name"])
+    return None
+
+# ── Core message handler ──────────────────────────────────────────────────────
 def handle_message(phone: str, raw_body: str) -> str:
     raw_body = raw_body.strip()
-    message  = raw_body.upper()
+    message  = raw_body.upper().strip()
 
     print(f"\n{'='*60}")
     print(f"[WEBHOOK] FROM={phone} | RAW='{raw_body}' | UPPER='{message}'")
@@ -426,31 +572,36 @@ def handle_message(phone: str, raw_body: str) -> str:
         if farmer:
             sessions[phone] = {"step": "done", "role": "farmer"}
             return (
-                f"Welcome back {farmer['name']}! 🌾\n\n"
-                f"Reply:\n"
-                f"POST JOB — Post a new job\n"
-                f"MY JOBS — View your posted jobs\n"
-                f"MY LABOURERS — See confirmed jobs & rate labourers\n"
-                f"RENT EQUIPMENT — Rent out your equipment\n"
-                f"MY EQUIPMENT — View your equipment listings\n"
-                f"CANCEL EQUIPMENT [id] — Remove an equipment listing\n"
-                f"SUBSIDIES — View government schemes"
+                f"Welcome back, {farmer['name']}! 🌾\n\n"
+                f"╔══════════════════════╗\n"
+                f"║  🌾 FARMER MENU      ║\n"
+                f"╚══════════════════════╝\n\n"
+                f"📋 POST JOB — Post a new job\n"
+                f"📂 MY JOBS — View your posted jobs\n"
+                f"👥 MY LABOURERS — Confirmed jobs & rate\n"
+                f"🚜 RENT EQUIPMENT — List equipment for rent\n"
+                f"🔧 MY EQUIPMENT — View your listings\n"
+                f"🏛️ SUBSIDIES — Government schemes\n\n"
+                f"💡 Tip: Send HELP anytime to see this menu."
             )
         labourer = get_from_db("labourers", phone)
         if labourer:
             sessions[phone] = {"step": "done", "role": "labourer"}
             return (
-                f"Welcome back {labourer['name']}! 👋\n\n"
-                f"Reply:\n"
-                f"VIEW JOBS — See available jobs near you\n"
-                f"VIEW EQUIPMENT — Browse equipment for rent near you\n"
-                f"BOOK EQUIPMENT [id] — Book a piece of equipment\n"
-                f"SUBSIDIES — View government schemes"
+                f"Welcome back, {labourer['name']}! 👋\n\n"
+                f"╔══════════════════════╗\n"
+                f"║  👷 LABOURER MENU    ║\n"
+                f"╚══════════════════════╝\n\n"
+                f"🔍 VIEW JOBS — See jobs near you\n"
+                f"🚜 VIEW EQUIPMENT — Browse equipment for rent\n"
+                f"🏛️ SUBSIDIES — Government schemes\n\n"
+                f"💡 Tip: Send HELP anytime to see this menu."
             )
         sessions[phone]["step"] = "role"
         return (
-            "🌾 Welcome to Farm Connect!\n\n"
-            "Are you a FARMER or LABOURER?\n"
+            "🌾 *Welcome to Farm Connect!*\n\n"
+            "Connecting farmers and labourers across Tamil Nadu.\n\n"
+            "Are you a *FARMER* or *LABOURER*?\n"
             "Reply FARMER or LABOURER to get started."
         )
 
@@ -465,7 +616,7 @@ def handle_message(phone: str, raw_body: str) -> str:
     elif step == "name":
         sessions[phone]["name"] = raw_body
         sessions[phone]["step"] = "location"
-        return f"Nice to meet you {raw_body}! What is your village or town name?"
+        return f"Nice to meet you, {raw_body}! 🙏\n\nWhat is your village or town name?"
 
     elif step == "location":
         sessions[phone]["location"] = raw_body.title()
@@ -474,7 +625,11 @@ def handle_message(phone: str, raw_body: str) -> str:
             sessions[phone]["step"] = "skill"
             return (
                 "What is your main skill?\n\n"
-                "1. Harvesting\n2. Planting\n3. Irrigation\n4. Weeding\n5. General Labour\n\n"
+                "1️⃣  Harvesting\n"
+                "2️⃣  Planting\n"
+                "3️⃣  Irrigation\n"
+                "4️⃣  Weeding\n"
+                "5️⃣  General Labour\n\n"
                 "Reply with the number or skill name."
             )
         else:
@@ -487,10 +642,10 @@ def handle_message(phone: str, raw_body: str) -> str:
                 return "⚠️ Error saving your details. Please try again."
             sessions[phone]["step"] = "done"
             return (
-                f"✅ Registered as Farmer!\n\n"
-                f"Name: {sessions[phone]['name']}\n"
-                f"Location: {sessions[phone]['location']}\n\n"
-                f"Reply POST JOB to post a new job."
+                f"✅ *Registered as Farmer!*\n\n"
+                f"👤 Name: {sessions[phone]['name']}\n"
+                f"📍 Location: {sessions[phone]['location']}\n\n"
+                f"Reply POST JOB to post your first job! 🌾"
             )
 
     elif step == "skill":
@@ -516,17 +671,31 @@ def handle_message(phone: str, raw_body: str) -> str:
         sessions[phone]["step"] = "done"
         sessions[phone]["role"] = "labourer"
         return (
-            f"✅ Registered as Labourer!\n\n"
-            f"Name: {sessions[phone]['name']}\n"
-            f"Location: {sessions[phone]['location']}\n"
-            f"Skill: {skill}\n\n"
-            f"Reply VIEW JOBS to see available jobs near you."
+            f"✅ *Registered as Labourer!*\n\n"
+            f"👤 Name: {sessions[phone]['name']}\n"
+            f"📍 Location: {sessions[phone]['location']}\n"
+            f"🛠️ Skill: {skill}\n\n"
+            f"Reply VIEW JOBS to see available jobs near you! 💪"
         )
 
     # ── MAIN MENU ─────────────────────────────────────────────────────────────
     elif step == "done":
         print(f"[FLOW] DONE menu — message='{message}'")
 
+        # ── Greeting / Help intercept ─────────────────────────────────────────
+        normalised = message.strip("!?.👋🌾 ")
+        if normalised in GREETINGS or message in GREETINGS:
+            menu = welcome_back(phone)
+            if menu:
+                return menu
+            sessions[phone] = {"step": "start"}
+            return (
+                "🌾 Welcome to Farm Connect!\n\n"
+                "Are you a FARMER or LABOURER?\n"
+                "Reply FARMER or LABOURER to get started."
+            )
+
+        # ── POST JOB ──────────────────────────────────────────────────────────
         if message == "POST JOB":
             farmer = get_from_db("farmers", phone)
             if not farmer:
@@ -534,11 +703,12 @@ def handle_message(phone: str, raw_body: str) -> str:
             sessions[phone]["step"] = "job_work_type"
             sessions[phone]["job"] = {}
             return (
-                "📋 Let's post your job!\n\n"
+                "📋 *Let's post your job!*\n\n"
                 "What type of work is needed?\n"
                 "(e.g. Harvesting, Planting, Irrigation, Weeding)"
             )
 
+        # ── MY LABOURERS ──────────────────────────────────────────────────────
         elif message == "MY LABOURERS":
             farmer = get_from_db("farmers", phone)
             if not farmer:
@@ -546,21 +716,23 @@ def handle_message(phone: str, raw_body: str) -> str:
             jobs = get_confirmed_jobs_for_farmer(phone)
             if not jobs:
                 return "No confirmed jobs found.\nReply POST JOB to post one."
-            msg = "👥 Your Confirmed Jobs:\n\n"
+            msg = "👥 *Your Confirmed Jobs:*\n\n"
             for job in jobs:
-                rated = "✅ Rated" if job.get("rated") else "⭐ Not rated"
+                rated = "✅ Rated" if job.get("rated") else "⭐ Not rated yet"
                 labourer_phone = job.get("labourer_phone")
                 labourer = get_from_db("labourers", labourer_phone) if labourer_phone else None
                 labourer_name = labourer["name"] if labourer else "Unknown"
+                rating_str = f" ({labourer['rating']}⭐)" if labourer and labourer.get("rating") else ""
                 msg += (
-                    f"ID: {job['id']}\n"
-                    f"Work: {job['work_type']} | Date: {job['start_date']}\n"
-                    f"Labourer: {labourer_name}\n"
-                    f"Status: {rated}\n\n"
+                    f"🔹 Job #{job['id']}\n"
+                    f"   Work: {job['work_type']} | Date: {job['start_date']}\n"
+                    f"   Labourer: {labourer_name}{rating_str}\n"
+                    f"   {rated}\n\n"
                 )
-            msg += "Reply RATE [job_id] [1-5] to rate a labourer."
+            msg += "Reply RATE [job_id] [1-5] to rate a labourer.\nExample: RATE 12 5"
             return msg
 
+        # ── RATE ──────────────────────────────────────────────────────────────
         elif message.startswith("RATE"):
             parts = raw_body.split()
             if len(parts) != 3 or not parts[1].isdigit() or not parts[2].isdigit():
@@ -596,11 +768,13 @@ def handle_message(phone: str, raw_body: str) -> str:
             new_rating = round(((old_rating * old_total) + stars) / new_total, 1)
             update_db("labourers", {"phone": labourer_phone}, {"rating": new_rating, "total_ratings": new_total})
             update_db("jobs", {"id": job_id}, {"rated": True})
+            star_display = "⭐" * stars
             return (
-                f"✅ Rated {labourer['name']} — {stars} stars!\n"
-                f"Their new rating: {new_rating}⭐ ({new_total} ratings)"
+                f"✅ Rated {labourer['name']} — {star_display}\n"
+                f"Their new rating: {new_rating}⭐ ({new_total} total ratings)"
             )
 
+        # ── MY JOBS ───────────────────────────────────────────────────────────
         elif message == "MY JOBS":
             farmer = get_from_db("farmers", phone)
             if not farmer:
@@ -608,17 +782,20 @@ def handle_message(phone: str, raw_body: str) -> str:
             jobs = get_jobs_by_phone(phone)
             if not jobs:
                 return "You haven't posted any jobs yet.\nReply POST JOB to post one."
-            msg = "📋 Your Recent Jobs:\n\n"
+            msg = "📋 *Your Recent Jobs:*\n\n"
+            status_icon = {"open": "🟢", "confirmed": "✅", "cancelled": "❌"}
             for i, job in enumerate(jobs):
+                icon = status_icon.get(job["status"], "⚪")
                 msg += (
                     f"{i+1}. {job['work_type']} — {job['location']}\n"
                     f"   👥 {job['num_labourers']} labourers | ₹{job['wage']}/day\n"
-                    f"   📅 {job['start_date']} | {job['status'].upper()}\n"
+                    f"   📅 {job['start_date']} | {icon} {job['status'].upper()}\n"
                     f"   ID: {job['id']}\n\n"
                 )
             msg += "Reply CANCEL [ID] to cancel a job."
             return msg
 
+        # ── VIEW JOBS ─────────────────────────────────────────────────────────
         elif message == "VIEW JOBS":
             labourer = get_from_db("labourers", phone)
             if not labourer:
@@ -626,19 +803,20 @@ def handle_message(phone: str, raw_body: str) -> str:
             jobs = get_open_jobs_by_location(labourer["location"])
             if not jobs:
                 return (
-                    f"No open jobs in {labourer['location']} right now.\n"
-                    f"We'll notify you when new jobs are posted!"
+                    f"No open jobs in {labourer['location']} right now. 😔\n\n"
+                    f"We'll notify you the moment a new job is posted nearby! 🔔"
                 )
-            msg = f"🔍 Open Jobs in {labourer['location']}:\n\n"
+            msg = f"🔍 *Open Jobs in {labourer['location']}:*\n\n"
             for i, job in enumerate(jobs):
                 msg += (
-                    f"{i+1}. {job['work_type']}\n"
+                    f"{i+1}. 🔨 {job['work_type']}\n"
                     f"   👥 {job['num_labourers']} needed | ₹{job['wage']}/day\n"
                     f"   📅 {job['start_date']}\n"
-                    f"   Reply CONFIRM {job['id']} to accept\n\n"
+                    f"   ➡️ Reply CONFIRM {job['id']} to accept\n\n"
                 )
             return msg
 
+        # ── CONFIRM ───────────────────────────────────────────────────────────
         elif message.startswith("CONFIRM"):
             parts = raw_body.split()
             if len(parts) < 2 or not parts[1].isdigit():
@@ -657,18 +835,24 @@ def handle_message(phone: str, raw_body: str) -> str:
             job = updated[0]
             send_whatsapp(
                 job["farmer_phone"],
-                f"✅ Job Confirmed!\n\nLabourer: {labourer['name']}\n"
-                f"Skill: {labourer.get('skill', 'General')}\n"
-                f"Work: {job['work_type']}\nDate: {job['start_date']}\n\n"
+                f"✅ *Job Confirmed!*\n\n"
+                f"👤 Labourer: {labourer['name']}\n"
+                f"🛠️ Skill: {labourer.get('skill', 'General')}\n"
+                f"🔨 Work: {job['work_type']}\n"
+                f"📍 Location: {job['location']}\n"
+                f"📅 Date: {job['start_date']}\n\n"
                 f"Your labourer will arrive on the job date. 🌾"
             )
             return (
-                f"✅ Job Confirmed!\n\n"
-                f"Work: {job['work_type']}\nLocation: {job['location']}\n"
-                f"Date: {job['start_date']}\nWage: ₹{job['wage']}/day\n\n"
+                f"✅ *Job Confirmed!*\n\n"
+                f"🔨 Work: {job['work_type']}\n"
+                f"📍 Location: {job['location']}\n"
+                f"📅 Date: {job['start_date']}\n"
+                f"💰 Wage: ₹{job['wage']}/day\n\n"
                 f"Please arrive on time. Good luck! 💪"
             )
 
+        # ── CANCEL JOB ────────────────────────────────────────────────────────
         elif message.startswith("CANCEL") and not message.startswith("CANCEL EQUIPMENT"):
             parts = raw_body.split()
             if len(parts) < 2 or not parts[1].isdigit():
@@ -686,17 +870,15 @@ def handle_message(phone: str, raw_body: str) -> str:
             if labourer_phone:
                 send_whatsapp(
                     labourer_phone,
-                    f"⚠️ Job Cancelled\n\nWork: {job['work_type']}\n"
-                    f"Location: {job['location']}\nDate: {job['start_date']}\n\n"
+                    f"⚠️ *Job Cancelled*\n\n"
+                    f"🔨 Work: {job['work_type']}\n"
+                    f"📍 Location: {job['location']}\n"
+                    f"📅 Date: {job['start_date']}\n\n"
                     f"This job has been cancelled by the farmer. Sorry for the inconvenience."
                 )
-                print(f"[CANCEL] Notified labourer {labourer_phone} for job {job_id}")
-            else:
-                print(f"[CANCEL] No labourer on job {job_id} — no notification")
             return f"✅ Job #{job_id} has been cancelled."
 
-        # ── EQUIPMENT COMMANDS ────────────────────────────────────────────────
-
+        # ── RENT EQUIPMENT ────────────────────────────────────────────────────
         elif message == "RENT EQUIPMENT":
             farmer = get_from_db("farmers", phone)
             if not farmer:
@@ -704,11 +886,12 @@ def handle_message(phone: str, raw_body: str) -> str:
             sessions[phone]["step"] = "equip_name"
             sessions[phone]["equip"] = {}
             return (
-                "🚜 Let's list your equipment!\n\n"
+                "🚜 *Let's list your equipment!*\n\n"
                 "What equipment do you want to rent out?\n"
                 "(e.g. Tractor, Rotavator, Sprayer, Thresher)"
             )
 
+        # ── VIEW EQUIPMENT ────────────────────────────────────────────────────
         elif message == "VIEW EQUIPMENT":
             user = get_from_db("farmers", phone) or get_from_db("labourers", phone)
             if not user:
@@ -717,19 +900,20 @@ def handle_message(phone: str, raw_body: str) -> str:
             items = get_equipment_by_location(location)
             if not items:
                 return (
-                    f"No equipment available for rent in {location} right now.\n"
+                    f"No equipment available for rent in {location} right now. 😔\n"
                     f"Check back later!"
                 )
-            msg = f"🚜 Equipment Available in {location}:\n\n"
+            msg = f"🚜 *Equipment Available in {location}:*\n\n"
             for i, item in enumerate(items):
                 msg += (
-                    f"{i+1}. {item['name']}\n"
+                    f"{i+1}. 🔧 {item['name']}\n"
                     f"   💰 ₹{item['rent_per_day']}/day\n"
-                    f"   📅 Available until: {item.get('available_until') or 'Ongoing'}\n"
-                    f"   Reply BOOK EQUIPMENT {item['id']} to book\n\n"
+                    f"   📅 Until: {item.get('available_until') or 'Ongoing'}\n"
+                    f"   ➡️ Reply BOOK EQUIPMENT {item['id']} to book\n\n"
                 )
             return msg
 
+        # ── BOOK EQUIPMENT ────────────────────────────────────────────────────
         elif message.startswith("BOOK EQUIPMENT"):
             parts = raw_body.split()
             if len(parts) < 3 or not parts[2].isdigit():
@@ -754,7 +938,7 @@ def handle_message(phone: str, raw_body: str) -> str:
                 return "❌ Could not complete booking. Please try again."
             send_whatsapp(
                 item["owner_phone"],
-                f"🔔 Equipment Booking Confirmed!\n\n"
+                f"🔔 *Equipment Booking Confirmed!*\n\n"
                 f"🚜 Equipment: {item['name']}\n"
                 f"👤 Booked by: {user['name']}\n"
                 f"📞 Contact: {phone}\n"
@@ -762,13 +946,14 @@ def handle_message(phone: str, raw_body: str) -> str:
                 f"Please coordinate with them for pickup/delivery."
             )
             return (
-                f"✅ Equipment Booked!\n\n"
+                f"✅ *Equipment Booked!*\n\n"
                 f"🚜 Equipment: {item['name']}\n"
                 f"💰 Rent: ₹{item['rent_per_day']}/day\n"
                 f"📅 Available until: {item.get('available_until') or 'Ongoing'}\n\n"
-                f"The owner has been notified. They will contact you shortly!"
+                f"The owner has been notified. They will contact you shortly! 📞"
             )
 
+        # ── MY EQUIPMENT ──────────────────────────────────────────────────────
         elif message == "MY EQUIPMENT":
             farmer = get_from_db("farmers", phone)
             if not farmer:
@@ -776,11 +961,11 @@ def handle_message(phone: str, raw_body: str) -> str:
             items = get_equipment_by_owner(phone)
             if not items:
                 return "You haven't listed any equipment yet.\nReply RENT EQUIPMENT to add one."
-            msg = "🚜 Your Equipment Listings:\n\n"
+            msg = "🚜 *Your Equipment Listings:*\n\n"
             for i, item in enumerate(items):
                 status = "✅ Available" if item.get("available") else "🔒 Booked"
                 msg += (
-                    f"{i+1}. {item['name']}\n"
+                    f"{i+1}. 🔧 {item['name']}\n"
                     f"   💰 ₹{item['rent_per_day']}/day | {status}\n"
                     f"   📅 Until: {item.get('available_until') or 'Ongoing'}\n"
                     f"   ID: {item['id']}\n\n"
@@ -788,6 +973,7 @@ def handle_message(phone: str, raw_body: str) -> str:
             msg += "Reply CANCEL EQUIPMENT [id] to remove a listing."
             return msg
 
+        # ── CANCEL EQUIPMENT ──────────────────────────────────────────────────
         elif message.startswith("CANCEL EQUIPMENT"):
             parts = raw_body.split()
             if len(parts) < 3 or not parts[2].isdigit():
@@ -809,39 +995,46 @@ def handle_message(phone: str, raw_body: str) -> str:
             if booked_by:
                 send_whatsapp(
                     booked_by,
-                    f"⚠️ Equipment Booking Cancelled\n\n"
+                    f"⚠️ *Equipment Booking Cancelled*\n\n"
                     f"🚜 Equipment: {item['name']}\n"
                     f"📍 Location: {item['location']}\n\n"
                     f"The owner has cancelled this listing. Sorry for the inconvenience."
                 )
-                print(f"[CANCEL EQUIP] Notified booker {booked_by} for equipment {equipment_id}")
             return f"✅ Equipment listing #{equipment_id} ({item['name']}) has been cancelled."
 
-        # ── SUBSIDY COMMANDS ──────────────────────────────────────────────────
-
+        # ── SUBSIDIES ─────────────────────────────────────────────────────────
         elif message == "SUBSIDIES":
-            msg = "🏛️ Government Schemes Available:\n\n"
-            for i, scheme in enumerate(SUBSIDY_SCHEMES):
-                msg += f"{i+1}. {scheme['name']}\n   {scheme['short']}\n\n"
+            schemes = active_schemes()
+            if not schemes:
+                return "No government schemes are active right now. Check back later!"
+            msg = "🏛️ *Active Government Schemes:*\n\n"
+            for i, scheme in enumerate(schemes):
+                tag = expiry_tag(scheme)
+                msg += f"{i+1}. 📌 {scheme['name']}\n   {scheme['short']}\n   {tag}\n\n"
             msg += "Reply SUBSIDY [number] for full details.\nExample: SUBSIDY 1"
             return msg
 
+        # ── SUBSIDY [n] ───────────────────────────────────────────────────────
         elif message.startswith("SUBSIDY"):
             parts = raw_body.split()
             if len(parts) < 2 or not parts[1].isdigit():
                 return "❓ Couldn't read that.\n\nFormat: SUBSIDY [number]\nExample: SUBSIDY 2"
+            schemes = active_schemes()
             index = int(parts[1]) - 1
-            if index < 0 or index >= len(SUBSIDY_SCHEMES):
-                return f"❌ Invalid number. Reply SUBSIDIES to see the list (1-{len(SUBSIDY_SCHEMES)})."
-            scheme = SUBSIDY_SCHEMES[index]
+            if index < 0 or index >= len(schemes):
+                return f"❌ Invalid number. Reply SUBSIDIES to see the list (1–{len(schemes)})."
+            scheme = schemes[index]
+            tag = expiry_tag(scheme)
             return (
-                f"🏛️ {scheme['name']}\n\n"
-                f"📋 Eligibility:\n{scheme['eligibility']}\n\n"
-                f"💰 Benefit:\n{scheme['benefit']}\n\n"
-                f"📝 How to Apply:\n{scheme['how_to_apply']}\n\n"
+                f"🏛️ *{scheme['name']}*\n"
+                f"{tag}\n\n"
+                f"📋 *Eligibility:*\n{scheme['eligibility']}\n\n"
+                f"💰 *Benefit:*\n{scheme['benefit']}\n\n"
+                f"📝 *How to Apply:*\n{scheme['how_to_apply']}\n\n"
                 f"Reply SUBSIDIES to see the full list."
             )
 
+        # ── Unknown command ───────────────────────────────────────────────────
         else:
             suggestion, hint = fuzzy_suggestion(message)
             if suggestion:
@@ -851,23 +1044,10 @@ def handle_message(phone: str, raw_body: str) -> str:
                 )
             farmer = get_from_db("farmers", phone)
             if farmer:
-                return (
-                    f"❌ Unknown command.\n\nHello {farmer['name']}! 🌾 Available commands:\n"
-                    f"POST JOB — Post a new job\n"
-                    f"MY JOBS — View your posted jobs\n"
-                    f"MY LABOURERS — See confirmed jobs & rate labourers\n"
-                    f"RENT EQUIPMENT — Rent out your equipment\n"
-                    f"MY EQUIPMENT — View your equipment listings\n"
-                    f"SUBSIDIES — View government schemes"
-                )
+                return farmer_menu(farmer["name"])
             labourer = get_from_db("labourers", phone)
             if labourer:
-                return (
-                    f"❌ Unknown command.\n\nHello {labourer['name']}! 👋 Available commands:\n"
-                    f"VIEW JOBS — See available jobs near you\n"
-                    f"VIEW EQUIPMENT — Browse equipment for rent near you\n"
-                    f"SUBSIDIES — View government schemes"
-                )
+                return labourer_menu(labourer["name"])
             sessions[phone] = {"step": "start"}
             return (
                 "🌾 Welcome to Farm Connect!\n\n"
@@ -920,7 +1100,7 @@ def handle_message(phone: str, raw_body: str) -> str:
             return "⚠️ Error posting your job. Please try again by sending POST JOB."
         notify_nearby_labourers(saved)
         return (
-            f"✅ Job Posted Successfully!\n\n"
+            f"✅ *Job Posted Successfully!*\n\n"
             f"📍 Location: {location}\n"
             f"🔨 Work: {job['work_type']}\n"
             f"👥 Labourers needed: {job['num_labourers']}\n"
@@ -942,7 +1122,7 @@ def handle_message(phone: str, raw_body: str) -> str:
         sessions[phone]["step"] = "equip_available_until"
         return (
             "Available until which date?\n"
-            "(e.g. 30 June 2026, Tomorrow, or reply 'ongoing' if no end date)"
+            "(e.g. 30 June 2026, Tomorrow, or reply *ongoing* if no end date)"
         )
 
     elif step == "equip_available_until":
@@ -967,12 +1147,12 @@ def handle_message(phone: str, raw_body: str) -> str:
             return "⚠️ Error listing your equipment. Please try again by sending RENT EQUIPMENT."
         notify_nearby_users_about_equipment(saved)
         return (
-            f"✅ Equipment Listed!\n\n"
+            f"✅ *Equipment Listed!*\n\n"
             f"🚜 Equipment: {equip['name']}\n"
             f"💰 Rent: ₹{equip['rent_per_day']}/day\n"
             f"📍 Location: {farmer.get('location', 'Unknown')}\n"
             f"📅 Available until: {available_until or 'Ongoing'}\n\n"
-            f"Farmers and labourers nearby can now find your equipment!"
+            f"Farmers and labourers nearby can now find your equipment! 🔔"
         )
 
     # ── FALLBACK ──────────────────────────────────────────────────────────────
@@ -993,7 +1173,7 @@ def ping():
 
 @app.api_route("/", methods=["GET", "HEAD"])
 def root():
-    return {"message": "Farm Connect API is running"}
+    return {"message": "Farm Connect API is running 🌾"}
 
 # ── Twilio webhook ─────────────────────────────────────────────────────────────
 @app.post("/webhook")
@@ -1082,6 +1262,11 @@ def chat_ui():
   #send { background: #00a884; border: none; color: white; width: 44px; height: 44px; border-radius: 50%; cursor: pointer; font-size: 18px; flex-shrink: 0; transition: background 0.15s; }
   #send:hover { background: #06cf9c; }
   #send:disabled { background: #3b4a54; cursor: default; }
+
+  /* Quick-reply chips */
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 16px; background: #111b21; border-top: 1px solid #1f2c33; flex-shrink: 0; }
+  .chip { background: #2a3942; border: 1px solid #3b4a54; color: #aebac1; font-size: 11px; padding: 4px 10px; border-radius: 14px; cursor: pointer; transition: background 0.15s; user-select: none; }
+  .chip:hover { background: #3b4a54; color: #e9edef; }
 </style>
 </head>
 <body>
@@ -1113,9 +1298,20 @@ def chat_ui():
 <div id="chat">
   <div class="bubble-wrap recv">
     <div class="bubble">👋 Welcome to Farm Connect Web Tester!
-Type any message below and press Enter.
+Type any message below or tap a quick reply.
 <div class="time">now</div></div>
   </div>
+</div>
+
+<div class="chips">
+  <span class="chip" onclick="quickSend('Hi')">Hi</span>
+  <span class="chip" onclick="quickSend('POST JOB')">POST JOB</span>
+  <span class="chip" onclick="quickSend('MY JOBS')">MY JOBS</span>
+  <span class="chip" onclick="quickSend('VIEW JOBS')">VIEW JOBS</span>
+  <span class="chip" onclick="quickSend('SUBSIDIES')">SUBSIDIES</span>
+  <span class="chip" onclick="quickSend('RENT EQUIPMENT')">RENT EQUIPMENT</span>
+  <span class="chip" onclick="quickSend('VIEW EQUIPMENT')">VIEW EQUIPMENT</span>
+  <span class="chip" onclick="quickSend('MY LABOURERS')">MY LABOURERS</span>
 </div>
 
 <div class="input-bar">
@@ -1167,15 +1363,14 @@ Type any message below and press Enter.
     if (el) el.remove();
   }
 
-  async function sendMessage() {
+  async function sendMessage(overrideText) {
     const input  = document.getElementById('msg');
     const btn    = document.getElementById('send');
-    const text   = input.value.trim();
+    const text   = overrideText || input.value.trim();
     if (!text) return;
 
     const phone = getPhone();
-    input.value = '';
-    input.style.height = 'auto';
+    if (!overrideText) { input.value = ''; input.style.height = 'auto'; }
     addBubble(text, 'sent');
     btn.disabled = true;
     showTyping();
@@ -1198,6 +1393,10 @@ Type any message below and press Enter.
     }
   }
 
+  function quickSend(text) {
+    sendMessage(text);
+  }
+
   async function resetSession() {
     const phone = getPhone();
     try {
@@ -1208,7 +1407,7 @@ Type any message below and press Enter.
       });
     } catch(e) {}
     document.getElementById('chat').innerHTML = '';
-    addBubble(`Session reset for ${phone}.\nSay Hi to start fresh! 👋`, 'recv');
+    addBubble(`Session reset for ${phone}.\\nSay Hi to start fresh! 👋`, 'recv');
   }
 
   const msgEl = document.getElementById('msg');
