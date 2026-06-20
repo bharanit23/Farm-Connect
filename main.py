@@ -71,7 +71,7 @@ KNOWN_COMMANDS = [
     "POST JOB", "MY JOBS", "MY LABOURERS", "VIEW JOBS",
     "CONFIRM", "CANCEL", "RATE",
     "RENT EQUIPMENT", "VIEW EQUIPMENT", "MY EQUIPMENT", "BOOK EQUIPMENT", "CANCEL EQUIPMENT",
-    "SUBSIDIES", "SUBSIDY",
+    "SUBSIDIES", "SUBSIDY", "MY PROFILE",
 ]
 
 def fuzzy_suggestion(message, threshold=2):
@@ -90,6 +90,7 @@ def fuzzy_suggestion(message, threshold=2):
         "CANCEL EQUIPMENT": "Format: CANCEL EQUIPMENT [id]  •  Example: CANCEL EQUIPMENT 3",
         "SUBSIDIES":        "Just send: SUBSIDIES",
         "SUBSIDY":          "Format: SUBSIDY [number]  •  Example: SUBSIDY 2",
+        "MY PROFILE":       "Just send: MY PROFILE",
     }
     for cmd in KNOWN_COMMANDS:
         if message.startswith(cmd) and message != cmd:
@@ -463,6 +464,33 @@ def get_confirmed_jobs_for_farmer(phone):
         print(f"[DB] get_confirmed_jobs_for_farmer ERROR: {e}")
         return []
 
+def count_jobs_posted_by_farmer(phone):
+    """Total number of jobs ever posted by a farmer (any status)."""
+    try:
+        encoded_phone = quote(phone, safe="")
+        url = f"{SUPABASE_URL}/rest/v1/jobs?farmer_phone=eq.{encoded_phone}&select=id"
+        res = req.get(url, headers=HEADERS, timeout=10)
+        res.raise_for_status()
+        data = res.json()
+        return len(data) if isinstance(data, list) else 0
+    except Exception as e:
+        print(f"[DB] count_jobs_posted_by_farmer ERROR: {e}")
+        return 0
+
+def count_jobs_done_by_labourer(phone):
+    """Total number of confirmed (completed) jobs done by a labourer."""
+    try:
+        encoded_phone = quote(phone, safe="")
+        url = (f"{SUPABASE_URL}/rest/v1/jobs"
+               f"?labourer_phone=eq.{encoded_phone}&status=eq.confirmed&select=id")
+        res = req.get(url, headers=HEADERS, timeout=10)
+        res.raise_for_status()
+        data = res.json()
+        return len(data) if isinstance(data, list) else 0
+    except Exception as e:
+        print(f"[DB] count_jobs_done_by_labourer ERROR: {e}")
+        return 0
+
 # ── Equipment DB helpers ──────────────────────────────────────────────────────
 def save_equipment(data):
     return save_to_db("equipment", data)
@@ -570,7 +598,8 @@ def farmer_menu(name: str) -> str:
         f"👥 MY LABOURERS — Confirmed jobs & rate\n"
         f"🚜 RENT EQUIPMENT — List equipment for rent\n"
         f"🔧 MY EQUIPMENT — View your listings\n"
-        f"🏛️ SUBSIDIES — Government schemes\n\n"
+        f"🏛️ SUBSIDIES — Government schemes\n"
+        f"🪪 MY PROFILE — View your profile\n\n"
         f"💡 Tip: Send HELP anytime to see this menu."
     )
 
@@ -582,7 +611,8 @@ def labourer_menu(name: str) -> str:
         f"╚══════════════════════╝\n\n"
         f"🔍 VIEW JOBS — See jobs near you\n"
         f"🚜 VIEW EQUIPMENT — Browse equipment for rent\n"
-        f"🏛️ SUBSIDIES — Government schemes\n\n"
+        f"🏛️ SUBSIDIES — Government schemes\n"
+        f"🪪 MY PROFILE — View your profile\n\n"
         f"💡 Tip: Send HELP anytime to see this menu."
     )
 
@@ -614,31 +644,16 @@ def handle_message(phone: str, raw_body: str) -> str:
         farmer = get_from_db("farmers", phone)
         if farmer:
             sessions[phone] = {"step": "done", "role": "farmer"}
-            return (
-                f"Welcome back, {farmer['name']}! 🌾\n\n"
-                f"╔══════════════════════╗\n"
-                f"║  🌾 FARMER MENU      ║\n"
-                f"╚══════════════════════╝\n\n"
-                f"📋 POST JOB — Post a new job\n"
-                f"📂 MY JOBS — View your posted jobs\n"
-                f"👥 MY LABOURERS — Confirmed jobs & rate\n"
-                f"🚜 RENT EQUIPMENT — List equipment for rent\n"
-                f"🔧 MY EQUIPMENT — View your listings\n"
-                f"🏛️ SUBSIDIES — Government schemes\n\n"
-                f"💡 Tip: Send HELP anytime to see this menu."
+            return farmer_menu(farmer["name"]).replace(
+                f"Hello {farmer['name']}! 🌾 How can I help you today?",
+                f"Welcome back, {farmer['name']}! 🌾"
             )
         labourer = get_from_db("labourers", phone)
         if labourer:
             sessions[phone] = {"step": "done", "role": "labourer"}
-            return (
-                f"Welcome back, {labourer['name']}! 👋\n\n"
-                f"╔══════════════════════╗\n"
-                f"║  👷 LABOURER MENU    ║\n"
-                f"╚══════════════════════╝\n\n"
-                f"🔍 VIEW JOBS — See jobs near you\n"
-                f"🚜 VIEW EQUIPMENT — Browse equipment for rent\n"
-                f"🏛️ SUBSIDIES — Government schemes\n\n"
-                f"💡 Tip: Send HELP anytime to see this menu."
+            return labourer_menu(labourer["name"]).replace(
+                f"Hello {labourer['name']}! 👋 How can I help you today?",
+                f"Welcome back, {labourer['name']}! 👋"
             )
         sessions[phone]["step"] = "role"
         return (
@@ -750,6 +765,38 @@ def handle_message(phone: str, raw_body: str) -> str:
                 "What type of work is needed?\n"
                 "(e.g. Harvesting, Planting, Irrigation, Weeding)"
             )
+
+        # ── MY PROFILE ────────────────────────────────────────────────────────
+        elif message == "MY PROFILE":
+            farmer = get_from_db("farmers", phone)
+            if farmer:
+                total_posted = count_jobs_posted_by_farmer(phone)
+                return (
+                    f"🪪 *My Profile*\n\n"
+                    f"👤 Name: {farmer['name']}\n"
+                    f"📍 Location: {farmer['location']}\n"
+                    f"📋 Total jobs posted: {total_posted}\n\n"
+                    f"Reply POST JOB to post a new job."
+                )
+            labourer = get_from_db("labourers", phone)
+            if labourer:
+                total_done = count_jobs_done_by_labourer(phone)
+                rating = labourer.get("rating")
+                total_ratings = labourer.get("total_ratings", 0)
+                if rating and total_ratings:
+                    rating_str = f"{rating}⭐ ({total_ratings} rating{'s' if total_ratings != 1 else ''})"
+                else:
+                    rating_str = "No ratings yet"
+                return (
+                    f"🪪 *My Profile*\n\n"
+                    f"👤 Name: {labourer['name']}\n"
+                    f"📍 Location: {labourer['location']}\n"
+                    f"🛠️ Skill: {labourer.get('skill', 'General')}\n"
+                    f"⭐ Rating: {rating_str}\n"
+                    f"✅ Total jobs done: {total_done}\n\n"
+                    f"Reply VIEW JOBS to find more work."
+                )
+            return "❌ Please register first. Reply HI to get started."
 
         # ── MY LABOURERS ──────────────────────────────────────────────────────
         elif message == "MY LABOURERS":
@@ -1374,6 +1421,7 @@ Type any message below or tap a quick reply.
   <span class="chip" onclick="quickSend('RENT EQUIPMENT')">RENT EQUIPMENT</span>
   <span class="chip" onclick="quickSend('VIEW EQUIPMENT')">VIEW EQUIPMENT</span>
   <span class="chip" onclick="quickSend('MY LABOURERS')">MY LABOURERS</span>
+  <span class="chip" onclick="quickSend('MY PROFILE')">MY PROFILE</span>
 </div>
 
 <div class="input-bar">
