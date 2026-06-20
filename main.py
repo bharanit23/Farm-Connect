@@ -57,6 +57,31 @@ GREETINGS = {
     "GM", "SUP", "YO", "HOWDY"
 }
 
+# ── Skill map (shared by signup + UPDATE SKILL) ───────────────────────────────
+SKILL_MAP = {
+    "1": "Harvesting", "HARVESTING": "Harvesting",
+    "2": "Planting", "PLANTING": "Planting",
+    "3": "Irrigation", "IRRIGATION": "Irrigation",
+    "4": "Weeding", "WEEDING": "Weeding",
+    "5": "General Labour", "GENERAL LABOUR": "General Labour",
+    "GENERAL": "General Labour",
+    "6": "Any Work (No Preference)", "ANY WORK": "Any Work (No Preference)",
+    "ANY WORK (NO PREFERENCE)": "Any Work (No Preference)",
+    "ANY": "Any Work (No Preference)", "FLEXIBLE": "Any Work (No Preference)",
+    "NO PREFERENCE": "Any Work (No Preference)",
+}
+
+SKILL_PROMPT = (
+    "What is your main skill?\n\n"
+    "1️⃣  Harvesting\n"
+    "2️⃣  Planting\n"
+    "3️⃣  Irrigation\n"
+    "4️⃣  Weeding\n"
+    "5️⃣  General Labour\n"
+    "6️⃣  Any Work (No Preference)\n\n"
+    "Reply with the number or skill name."
+)
+
 # ── Fuzzy near-miss helper ────────────────────────────────────────────────────
 def _edit_distance(a, b):
     dp = list(range(len(b) + 1))
@@ -69,7 +94,7 @@ def _edit_distance(a, b):
 
 KNOWN_COMMANDS = [
     "POST JOB", "MY JOBS", "MY LABOURERS", "MY FARMERS", "VIEW JOBS",
-    "CONFIRM", "CANCEL", "RATE",
+    "CONFIRM", "CANCEL", "RATE", "JOB DONE", "UPDATE SKILL",
     "RENT EQUIPMENT", "VIEW EQUIPMENT", "MY EQUIPMENT", "BOOK EQUIPMENT", "CANCEL EQUIPMENT",
     "SUBSIDIES", "SUBSIDY", "MY PROFILE",
 ]
@@ -79,6 +104,8 @@ def fuzzy_suggestion(message, threshold=2):
         "RATE":             "Format: RATE [job_id] [stars 1–5]  •  Example: RATE 12 5",
         "CANCEL":           "Format: CANCEL [job_id]  •  Example: CANCEL 7",
         "CONFIRM":          "Format: CONFIRM [job_id]  •  Example: CONFIRM 3",
+        "JOB DONE":         "Format: JOB DONE [job_id]  •  Example: JOB DONE 12",
+        "UPDATE SKILL":     "Just send: UPDATE SKILL",
         "POST JOB":         "Just send: POST JOB",
         "MY JOBS":          "Just send: MY JOBS",
         "MY LABOURERS":     "Just send: MY LABOURERS",
@@ -453,6 +480,7 @@ def get_labourers_by_location(location):
         return []
 
 def get_confirmed_jobs_for_farmer(phone):
+    """Jobs accepted by a labourer but not yet marked complete (farmer's pending-action list)."""
     try:
         encoded_phone = quote(phone, safe="")
         url = (f"{SUPABASE_URL}/rest/v1/jobs"
@@ -466,6 +494,7 @@ def get_confirmed_jobs_for_farmer(phone):
         return []
 
 def get_confirmed_jobs_for_labourer(phone):
+    """Jobs a labourer has accepted but not yet marked complete by the farmer."""
     try:
         encoded_phone = quote(phone, safe="")
         url = (f"{SUPABASE_URL}/rest/v1/jobs"
@@ -476,6 +505,34 @@ def get_confirmed_jobs_for_labourer(phone):
         return res.json() if isinstance(res.json(), list) else []
     except Exception as e:
         print(f"[DB] get_confirmed_jobs_for_labourer ERROR: {e}")
+        return []
+
+def get_completed_jobs_for_farmer(phone):
+    """Jobs marked completed — these are the ones eligible for rating."""
+    try:
+        encoded_phone = quote(phone, safe="")
+        url = (f"{SUPABASE_URL}/rest/v1/jobs"
+               f"?farmer_phone=eq.{encoded_phone}&status=eq.completed"
+               f"&order=start_date.desc&limit=10")
+        res = req.get(url, headers=HEADERS, timeout=10)
+        res.raise_for_status()
+        return res.json() if isinstance(res.json(), list) else []
+    except Exception as e:
+        print(f"[DB] get_completed_jobs_for_farmer ERROR: {e}")
+        return []
+
+def get_completed_jobs_for_labourer(phone):
+    """Jobs marked completed — these are the ones eligible for rating."""
+    try:
+        encoded_phone = quote(phone, safe="")
+        url = (f"{SUPABASE_URL}/rest/v1/jobs"
+               f"?labourer_phone=eq.{encoded_phone}&status=eq.completed"
+               f"&order=start_date.desc&limit=10")
+        res = req.get(url, headers=HEADERS, timeout=10)
+        res.raise_for_status()
+        return res.json() if isinstance(res.json(), list) else []
+    except Exception as e:
+        print(f"[DB] get_completed_jobs_for_labourer ERROR: {e}")
         return []
 
 def count_jobs_posted_by_farmer(phone):
@@ -492,11 +549,11 @@ def count_jobs_posted_by_farmer(phone):
         return 0
 
 def count_jobs_done_by_labourer(phone):
-    """Total number of confirmed (completed) jobs done by a labourer."""
+    """Total number of jobs actually completed (status=completed) by a labourer."""
     try:
         encoded_phone = quote(phone, safe="")
         url = (f"{SUPABASE_URL}/rest/v1/jobs"
-               f"?labourer_phone=eq.{encoded_phone}&status=eq.confirmed&select=id")
+               f"?labourer_phone=eq.{encoded_phone}&status=eq.completed&select=id")
         res = req.get(url, headers=HEADERS, timeout=10)
         res.raise_for_status()
         data = res.json()
@@ -609,7 +666,8 @@ def farmer_menu(name: str) -> str:
         f"╚══════════════════════╝\n\n"
         f"📋 POST JOB — Post a new job\n"
         f"📂 MY JOBS — View your posted jobs\n"
-        f"👥 MY LABOURERS — Confirmed jobs & rate\n"
+        f"👥 MY LABOURERS — Accepted/completed jobs\n"
+        f"✅ JOB DONE [id] — Mark a job as completed\n"
         f"🚜 RENT EQUIPMENT — List equipment for rent\n"
         f"🔧 MY EQUIPMENT — View your listings\n"
         f"🏛️ SUBSIDIES — Government schemes\n"
@@ -624,9 +682,10 @@ def labourer_menu(name: str) -> str:
         f"║  👷 LABOURER MENU    ║\n"
         f"╚══════════════════════╝\n\n"
         f"🔍 VIEW JOBS — See jobs near you\n"
-        f"👨‍🌾 MY FARMERS — Confirmed jobs & rate\n"
+        f"👨‍🌾 MY FARMERS — Accepted/completed jobs\n"
         f"🚜 VIEW EQUIPMENT — Browse equipment for rent\n"
         f"🏛️ SUBSIDIES — Government schemes\n"
+        f"🛠️ UPDATE SKILL — Change your listed skill\n"
         f"🪪 MY PROFILE — View your profile\n\n"
         f"💡 Tip: Send HELP anytime to see this menu."
     )
@@ -709,16 +768,7 @@ def handle_message(phone: str, raw_body: str) -> str:
         role = sessions[phone].get("role")
         if role == "labourer":
             sessions[phone]["step"] = "skill"
-            return (
-                "What is your main skill?\n\n"
-                "1️⃣  Harvesting\n"
-                "2️⃣  Planting\n"
-                "3️⃣  Irrigation\n"
-                "4️⃣  Weeding\n"
-                "5️⃣  General Labour\n"
-                "6️⃣  Any Work (No Preference)\n\n"
-                "Reply with the number or skill name."
-            )
+            return SKILL_PROMPT
         else:
             saved = save_to_db("farmers", {
                 "phone": phone,
@@ -736,29 +786,9 @@ def handle_message(phone: str, raw_body: str) -> str:
             )
 
     elif step == "skill":
-        skill_map = {
-            "1": "Harvesting", "HARVESTING": "Harvesting",
-            "2": "Planting", "PLANTING": "Planting",
-            "3": "Irrigation", "IRRIGATION": "Irrigation",
-            "4": "Weeding", "WEEDING": "Weeding",
-            "5": "General Labour", "GENERAL LABOUR": "General Labour",
-            "GENERAL": "General Labour",
-            "6": "Any Work (No Preference)", "ANY WORK": "Any Work (No Preference)",
-            "ANY WORK (NO PREFERENCE)": "Any Work (No Preference)",
-            "ANY": "Any Work (No Preference)", "FLEXIBLE": "Any Work (No Preference)",
-            "NO PREFERENCE": "Any Work (No Preference)",
-        }
-        skill = skill_map.get(message)
+        skill = SKILL_MAP.get(message)
         if not skill:
-            return (
-                "Please reply with a number 1-6 or skill name.\n\n"
-                "1️⃣  Harvesting\n"
-                "2️⃣  Planting\n"
-                "3️⃣  Irrigation\n"
-                "4️⃣  Weeding\n"
-                "5️⃣  General Labour\n"
-                "6️⃣  Any Work (No Preference)"
-            )
+            return f"Please reply with a number 1-6 or skill name.\n\n{SKILL_PROMPT}"
         saved = save_to_db("labourers", {
             "phone": phone,
             "name": sessions[phone]["name"],
@@ -777,6 +807,17 @@ def handle_message(phone: str, raw_body: str) -> str:
             f"Reply VIEW JOBS to see available jobs near you! 💪"
         )
 
+    # ── UPDATE SKILL FLOW (existing labourers) ────────────────────────────────
+    elif step == "update_skill":
+        skill = SKILL_MAP.get(message)
+        if not skill:
+            return f"Please reply with a number 1-6 or skill name.\n\n{SKILL_PROMPT}"
+        updated = update_db("labourers", {"phone": phone}, {"skill": skill})
+        sessions[phone]["step"] = "done"
+        if not updated:
+            return "⚠️ Error updating your skill. Please try again by sending UPDATE SKILL."
+        return f"✅ Your skill has been updated to *{skill}*.\n\nReply VIEW JOBS to see work near you."
+
     # ── MAIN MENU ─────────────────────────────────────────────────────────────
     elif step == "done":
         print(f"[FLOW] DONE menu — message='{message}'")
@@ -794,8 +835,20 @@ def handle_message(phone: str, raw_body: str) -> str:
                 "Reply FARMER or LABOURER to get started."
             )
 
+        # ── UPDATE SKILL ──────────────────────────────────────────────────────
+        if message == "UPDATE SKILL":
+            labourer = get_from_db("labourers", phone)
+            if not labourer:
+                return "❌ Only registered labourers can update their skill."
+            sessions[phone]["step"] = "update_skill"
+            current = labourer.get("skill") or "Not set"
+            return (
+                f"🛠️ Your current skill: *{current}*\n\n"
+                f"{SKILL_PROMPT}"
+            )
+
         # ── POST JOB ──────────────────────────────────────────────────────────
-        if message == "POST JOB":
+        elif message == "POST JOB":
             farmer = get_from_db("farmers", phone)
             if not farmer:
                 return "❌ Only registered farmers can post jobs."
@@ -841,7 +894,7 @@ def handle_message(phone: str, raw_body: str) -> str:
                     f"👤 Name: {labourer['name']}\n"
                     f"🧾 Role: Labourer\n"
                     f"📍 Location: {labourer['location']}\n"
-                    f"🛠️ Skill: {labourer.get('skill') or 'Not set — reply HELP if this looks wrong'}\n"
+                    f"🛠️ Skill: {labourer.get('skill') or 'Not set — reply UPDATE SKILL to set it'}\n"
                     f"⭐ Rating: {rating_str}\n"
                     f"✅ Total jobs completed: {total_done}\n\n"
                     f"Reply VIEW JOBS to find more work."
@@ -853,23 +906,39 @@ def handle_message(phone: str, raw_body: str) -> str:
             farmer = get_from_db("farmers", phone)
             if not farmer:
                 return "❌ Only farmers can use this command."
-            jobs = get_confirmed_jobs_for_farmer(phone)
-            if not jobs:
-                return "No confirmed jobs found.\nReply POST JOB to post one."
-            msg = "👥 *Your Confirmed Jobs:*\n\n"
-            for job in jobs:
-                rated = "✅ Rated" if job.get("rated") else "⭐ Not rated yet"
-                labourer_phone = job.get("labourer_phone")
-                labourer = get_from_db("labourers", labourer_phone) if labourer_phone else None
-                labourer_name = labourer["name"] if labourer else "Unknown"
-                rating_str = f" ({labourer['rating']}⭐)" if labourer and labourer.get("rating") else ""
-                msg += (
-                    f"🔹 Job #{job['id']}\n"
-                    f"   Work: {job['work_type']} | Date: {job['start_date']}\n"
-                    f"   Labourer: {labourer_name}{rating_str}\n"
-                    f"   {rated}\n\n"
-                )
-            msg += "Reply RATE [job_id] [1-5] to rate a labourer.\nExample: RATE 12 5"
+            pending   = get_confirmed_jobs_for_farmer(phone)
+            completed = get_completed_jobs_for_farmer(phone)
+            if not pending and not completed:
+                return "No accepted jobs found.\nReply POST JOB to post one."
+            msg = ""
+            if pending:
+                msg += "👥 *Accepted — Not Yet Completed:*\n\n"
+                for job in pending:
+                    labourer_phone = job.get("labourer_phone")
+                    labourer = get_from_db("labourers", labourer_phone) if labourer_phone else None
+                    labourer_name = labourer["name"] if labourer else "Unknown"
+                    msg += (
+                        f"🔹 Job #{job['id']}\n"
+                        f"   Work: {job['work_type']} | Date: {job['start_date']}\n"
+                        f"   Labourer: {labourer_name}\n"
+                        f"   🕓 In progress\n\n"
+                    )
+                msg += "Reply JOB DONE [job_id] once the work is finished.\nExample: JOB DONE 12\n\n"
+            if completed:
+                msg += "✅ *Completed Jobs:*\n\n"
+                for job in completed:
+                    rated = "✅ Rated" if job.get("rated") else "⭐ Not rated yet"
+                    labourer_phone = job.get("labourer_phone")
+                    labourer = get_from_db("labourers", labourer_phone) if labourer_phone else None
+                    labourer_name = labourer["name"] if labourer else "Unknown"
+                    rating_str = f" ({labourer['rating']}⭐)" if labourer and labourer.get("rating") else ""
+                    msg += (
+                        f"🔹 Job #{job['id']}\n"
+                        f"   Work: {job['work_type']} | Date: {job['start_date']}\n"
+                        f"   Labourer: {labourer_name}{rating_str}\n"
+                        f"   {rated}\n\n"
+                    )
+                msg += "Reply RATE [job_id] [1-5] to rate a labourer.\nExample: RATE 12 5"
             return msg
 
         # ── MY FARMERS ────────────────────────────────────────────────────────
@@ -877,24 +946,78 @@ def handle_message(phone: str, raw_body: str) -> str:
             labourer = get_from_db("labourers", phone)
             if not labourer:
                 return "❌ Only labourers can use this command."
-            jobs = get_confirmed_jobs_for_labourer(phone)
-            if not jobs:
-                return "No confirmed jobs found.\nReply VIEW JOBS to find work."
-            msg = "👨‍🌾 *Your Confirmed Jobs:*\n\n"
-            for job in jobs:
-                rated = "✅ Rated" if job.get("labourer_rated") else "⭐ Not rated yet"
-                farmer_phone = job.get("farmer_phone")
-                farmer = get_from_db("farmers", farmer_phone) if farmer_phone else None
-                farmer_name = farmer["name"] if farmer else "Unknown"
-                rating_str = f" ({farmer['rating']}⭐)" if farmer and farmer.get("rating") else ""
-                msg += (
-                    f"🔹 Job #{job['id']}\n"
-                    f"   Work: {job['work_type']} | Date: {job['start_date']}\n"
-                    f"   Farmer: {farmer_name}{rating_str}\n"
-                    f"   {rated}\n\n"
-                )
-            msg += "Reply RATE [job_id] [1-5] to rate a farmer.\nExample: RATE 12 5"
+            pending   = get_confirmed_jobs_for_labourer(phone)
+            completed = get_completed_jobs_for_labourer(phone)
+            if not pending and not completed:
+                return "No accepted jobs found.\nReply VIEW JOBS to find work."
+            msg = ""
+            if pending:
+                msg += "👨‍🌾 *Accepted — Not Yet Completed:*\n\n"
+                for job in pending:
+                    farmer_phone = job.get("farmer_phone")
+                    farmer = get_from_db("farmers", farmer_phone) if farmer_phone else None
+                    farmer_name = farmer["name"] if farmer else "Unknown"
+                    msg += (
+                        f"🔹 Job #{job['id']}\n"
+                        f"   Work: {job['work_type']} | Date: {job['start_date']}\n"
+                        f"   Farmer: {farmer_name}\n"
+                        f"   🕓 Waiting for farmer to mark JOB DONE\n\n"
+                    )
+            if completed:
+                msg += "✅ *Completed Jobs:*\n\n"
+                for job in completed:
+                    rated = "✅ Rated" if job.get("labourer_rated") else "⭐ Not rated yet"
+                    farmer_phone = job.get("farmer_phone")
+                    farmer = get_from_db("farmers", farmer_phone) if farmer_phone else None
+                    farmer_name = farmer["name"] if farmer else "Unknown"
+                    rating_str = f" ({farmer['rating']}⭐)" if farmer and farmer.get("rating") else ""
+                    msg += (
+                        f"🔹 Job #{job['id']}\n"
+                        f"   Work: {job['work_type']} | Date: {job['start_date']}\n"
+                        f"   Farmer: {farmer_name}{rating_str}\n"
+                        f"   {rated}\n\n"
+                    )
+                msg += "Reply RATE [job_id] [1-5] to rate a farmer.\nExample: RATE 12 5"
             return msg
+
+        # ── JOB DONE ──────────────────────────────────────────────────────────
+        elif message.startswith("JOB DONE"):
+            parts = raw_body.split()
+            if len(parts) < 3 or not parts[2].isdigit():
+                return "❓ Couldn't read that.\n\nFormat: JOB DONE [job_id]\nExample: JOB DONE 12"
+            job_id = parts[2]
+            farmer = get_from_db("farmers", phone)
+            if not farmer:
+                return "❌ Only the farmer who posted the job can mark it as done."
+            updated = update_db(
+                "jobs",
+                {"id": job_id, "farmer_phone": phone, "status": "confirmed"},
+                {"status": "completed"}
+            )
+            if not updated:
+                return "❌ Job not found, not yours, or not in an accepted state."
+            job = updated[0]
+            labourer_phone = job.get("labourer_phone")
+            labourer = get_from_db("labourers", labourer_phone) if labourer_phone else None
+            labourer_name = labourer["name"] if labourer else "the labourer"
+            if labourer_phone:
+                send_whatsapp(
+                    labourer_phone,
+                    f"✅ *Job Marked as Completed!*\n\n"
+                    f"🔨 Work: {job['work_type']}\n"
+                    f"📍 Location: {job['location']}\n"
+                    f"📅 Date: {job['start_date']}\n\n"
+                    f"The farmer has confirmed this job is done. 🎉\n\n"
+                    f"Please rate the farmer:\n"
+                    f"Reply RATE {job['id']} [1-5]\nExample: RATE {job['id']} 5"
+                )
+            return (
+                f"✅ *Job #{job['id']} marked as completed!*\n\n"
+                f"🔨 Work: {job['work_type']}\n"
+                f"👤 Labourer: {labourer_name}\n\n"
+                f"Please rate the labourer:\n"
+                f"Reply RATE {job['id']} [1-5]\nExample: RATE {job['id']} 5"
+            )
 
         # ── RATE ──────────────────────────────────────────────────────────────
         elif message.startswith("RATE"):
@@ -919,8 +1042,8 @@ def handle_message(phone: str, raw_body: str) -> str:
             if not jobs:
                 return "❌ Job not found."
             job = jobs[0]
-            if job["status"] != "confirmed":
-                return "❌ Can only rate confirmed jobs."
+            if job["status"] != "completed":
+                return "❌ You can only rate jobs after the farmer marks them as JOB DONE."
 
             # ── Farmer rating their labourer ─────────────────────────────────
             if farmer and job.get("farmer_phone") == phone:
@@ -978,7 +1101,7 @@ def handle_message(phone: str, raw_body: str) -> str:
             if not jobs:
                 return "You haven't posted any jobs yet.\nReply POST JOB to post one."
             msg = "📋 *Your Recent Jobs:*\n\n"
-            status_icon = {"open": "🟢", "confirmed": "✅", "cancelled": "❌"}
+            status_icon = {"open": "🟢", "confirmed": "🕓", "completed": "✅", "cancelled": "❌"}
             for i, job in enumerate(jobs):
                 icon = status_icon.get(job["status"], "⚪")
                 msg += (
@@ -987,7 +1110,7 @@ def handle_message(phone: str, raw_body: str) -> str:
                     f"   📅 {job['start_date']} | {icon} {job['status'].upper()}\n"
                     f"   ID: {job['id']}\n\n"
                 )
-            msg += "Reply CANCEL [ID] to cancel a job."
+            msg += "Reply CANCEL [ID] to cancel a job, or JOB DONE [ID] once work is complete."
             return msg
 
         # ── VIEW JOBS ─────────────────────────────────────────────────────────
@@ -1046,7 +1169,8 @@ def handle_message(phone: str, raw_body: str) -> str:
                 f"🔨 Work: {job['work_type']}\n"
                 f"📍 Location: {job['location']}\n"
                 f"📅 Date: {job['start_date']}\n\n"
-                f"Your labourer will arrive on the job date. 🌾"
+                f"Your labourer will arrive on the job date. 🌾\n"
+                f"Once the work is finished, reply JOB DONE {job['id']} to close it out and unlock ratings."
             )
             return (
                 f"✅ *Job Confirmed!*\n\n"
@@ -1054,7 +1178,8 @@ def handle_message(phone: str, raw_body: str) -> str:
                 f"📍 Location: {job['location']}\n"
                 f"📅 Date: {job['start_date']}\n"
                 f"💰 Wage: ₹{job['wage']}/day\n\n"
-                f"Please arrive on time. Good luck! 💪"
+                f"Please arrive on time. Good luck! 💪\n"
+                f"The farmer will mark the job as done once work is finished — that's when ratings open up."
             )
 
         # ── CANCEL JOB ────────────────────────────────────────────────────────
@@ -1537,6 +1662,7 @@ Type any message below or tap a quick reply.
   <span class="chip" onclick="quickSend('VIEW EQUIPMENT')">VIEW EQUIPMENT</span>
   <span class="chip" onclick="quickSend('MY LABOURERS')">MY LABOURERS</span>
   <span class="chip" onclick="quickSend('MY FARMERS')">MY FARMERS</span>
+  <span class="chip" onclick="quickSend('UPDATE SKILL')">UPDATE SKILL</span>
   <span class="chip" onclick="quickSend('MY PROFILE')">MY PROFILE</span>
 </div>
 
