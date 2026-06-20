@@ -68,7 +68,7 @@ def _edit_distance(a, b):
     return dp[-1]
 
 KNOWN_COMMANDS = [
-    "POST JOB", "MY JOBS", "MY LABOURERS", "VIEW JOBS",
+    "POST JOB", "MY JOBS", "MY LABOURERS", "MY FARMERS", "VIEW JOBS",
     "CONFIRM", "CANCEL", "RATE",
     "RENT EQUIPMENT", "VIEW EQUIPMENT", "MY EQUIPMENT", "BOOK EQUIPMENT", "CANCEL EQUIPMENT",
     "SUBSIDIES", "SUBSIDY", "MY PROFILE",
@@ -82,6 +82,7 @@ def fuzzy_suggestion(message, threshold=2):
         "POST JOB":         "Just send: POST JOB",
         "MY JOBS":          "Just send: MY JOBS",
         "MY LABOURERS":     "Just send: MY LABOURERS",
+        "MY FARMERS":       "Just send: MY FARMERS",
         "VIEW JOBS":        "Just send: VIEW JOBS",
         "RENT EQUIPMENT":   "Just send: RENT EQUIPMENT",
         "VIEW EQUIPMENT":   "Just send: VIEW EQUIPMENT",
@@ -464,6 +465,19 @@ def get_confirmed_jobs_for_farmer(phone):
         print(f"[DB] get_confirmed_jobs_for_farmer ERROR: {e}")
         return []
 
+def get_confirmed_jobs_for_labourer(phone):
+    try:
+        encoded_phone = quote(phone, safe="")
+        url = (f"{SUPABASE_URL}/rest/v1/jobs"
+               f"?labourer_phone=eq.{encoded_phone}&status=eq.confirmed"
+               f"&order=start_date.desc&limit=10")
+        res = req.get(url, headers=HEADERS, timeout=10)
+        res.raise_for_status()
+        return res.json() if isinstance(res.json(), list) else []
+    except Exception as e:
+        print(f"[DB] get_confirmed_jobs_for_labourer ERROR: {e}")
+        return []
+
 def count_jobs_posted_by_farmer(phone):
     """Total number of jobs ever posted by a farmer (any status)."""
     try:
@@ -610,6 +624,7 @@ def labourer_menu(name: str) -> str:
         f"║  👷 LABOURER MENU    ║\n"
         f"╚══════════════════════╝\n\n"
         f"🔍 VIEW JOBS — See jobs near you\n"
+        f"👨‍🌾 MY FARMERS — Confirmed jobs & rate\n"
         f"🚜 VIEW EQUIPMENT — Browse equipment for rent\n"
         f"🏛️ SUBSIDIES — Government schemes\n"
         f"🪪 MY PROFILE — View your profile\n\n"
@@ -666,6 +681,19 @@ def handle_message(phone: str, raw_body: str) -> str:
     # ── REGISTRATION ──────────────────────────────────────────────────────────
     elif step == "role":
         if message in ("FARMER", "LABOURER"):
+            opposite_table = "labourers" if message == "FARMER" else "farmers"
+            opposite_role  = "labourer" if message == "FARMER" else "farmer"
+            existing_opposite = get_from_db(opposite_table, phone)
+            if existing_opposite:
+                sessions[phone] = {"step": "done", "role": opposite_role}
+                menu = (farmer_menu(existing_opposite["name"]) if opposite_role == "farmer"
+                        else labourer_menu(existing_opposite["name"]))
+                return (
+                    f"⚠️ This number is already registered as a *{opposite_role.upper()}* "
+                    f"({existing_opposite['name']}).\n\n"
+                    f"A phone number can only be registered under one role.\n\n"
+                    f"{menu}"
+                )
             sessions[phone]["role"] = message.lower()
             sessions[phone]["step"] = "name"
             return "Great! What is your name?"
@@ -771,10 +799,17 @@ def handle_message(phone: str, raw_body: str) -> str:
             farmer = get_from_db("farmers", phone)
             if farmer:
                 total_posted = count_jobs_posted_by_farmer(phone)
+                rating = farmer.get("rating")
+                total_ratings = farmer.get("total_ratings", 0)
+                if rating and total_ratings:
+                    rating_str = f"{rating}⭐ ({total_ratings} rating{'s' if total_ratings != 1 else ''})"
+                else:
+                    rating_str = "No ratings yet"
                 return (
                     f"🪪 *My Profile*\n\n"
                     f"👤 Name: {farmer['name']}\n"
                     f"📍 Location: {farmer['location']}\n"
+                    f"⭐ Rating: {rating_str}\n"
                     f"📋 Total jobs posted: {total_posted}\n\n"
                     f"Reply POST JOB to post a new job."
                 )
@@ -822,6 +857,30 @@ def handle_message(phone: str, raw_body: str) -> str:
             msg += "Reply RATE [job_id] [1-5] to rate a labourer.\nExample: RATE 12 5"
             return msg
 
+        # ── MY FARMERS ────────────────────────────────────────────────────────
+        elif message == "MY FARMERS":
+            labourer = get_from_db("labourers", phone)
+            if not labourer:
+                return "❌ Only labourers can use this command."
+            jobs = get_confirmed_jobs_for_labourer(phone)
+            if not jobs:
+                return "No confirmed jobs found.\nReply VIEW JOBS to find work."
+            msg = "👨‍🌾 *Your Confirmed Jobs:*\n\n"
+            for job in jobs:
+                rated = "✅ Rated" if job.get("labourer_rated") else "⭐ Not rated yet"
+                farmer_phone = job.get("farmer_phone")
+                farmer = get_from_db("farmers", farmer_phone) if farmer_phone else None
+                farmer_name = farmer["name"] if farmer else "Unknown"
+                rating_str = f" ({farmer['rating']}⭐)" if farmer and farmer.get("rating") else ""
+                msg += (
+                    f"🔹 Job #{job['id']}\n"
+                    f"   Work: {job['work_type']} | Date: {job['start_date']}\n"
+                    f"   Farmer: {farmer_name}{rating_str}\n"
+                    f"   {rated}\n\n"
+                )
+            msg += "Reply RATE [job_id] [1-5] to rate a farmer.\nExample: RATE 12 5"
+            return msg
+
         # ── RATE ──────────────────────────────────────────────────────────────
         elif message.startswith("RATE"):
             parts = raw_body.split()
@@ -830,39 +889,70 @@ def handle_message(phone: str, raw_body: str) -> str:
             job_id, stars = parts[1], int(parts[2])
             if stars < 1 or stars > 5:
                 return "Stars must be between 1 and 5."
-            farmer = get_from_db("farmers", phone)
-            if not farmer:
-                return "❌ Only farmers can rate labourers."
+
+            farmer   = get_from_db("farmers", phone)
+            labourer = get_from_db("labourers", phone)
+            if not farmer and not labourer:
+                return "❌ Please register first. Reply HI to get started."
+
             try:
-                url = f"{SUPABASE_URL}/rest/v1/jobs?id=eq.{job_id}&farmer_phone=eq.{quote(phone, safe='')}"
+                url = f"{SUPABASE_URL}/rest/v1/jobs?id=eq.{job_id}"
                 res = req.get(url, headers=HEADERS, timeout=10)
                 jobs = res.json()
             except Exception:
                 return "❌ Could not fetch job. Try again."
             if not jobs:
-                return "❌ Job not found or doesn't belong to you."
+                return "❌ Job not found."
             job = jobs[0]
-            if job.get("rated"):
-                return "You've already rated this job."
             if job["status"] != "confirmed":
                 return "❌ Can only rate confirmed jobs."
-            labourer_phone = job.get("labourer_phone")
-            if not labourer_phone:
-                return "❌ No labourer assigned to this job."
-            labourer = get_from_db("labourers", labourer_phone)
-            if not labourer:
-                return "❌ Labourer not found."
-            old_total  = labourer.get("total_ratings", 0)
-            old_rating = labourer.get("rating", 0)
-            new_total  = old_total + 1
-            new_rating = round(((old_rating * old_total) + stars) / new_total, 1)
-            update_db("labourers", {"phone": labourer_phone}, {"rating": new_rating, "total_ratings": new_total})
-            update_db("jobs", {"id": job_id}, {"rated": True})
-            star_display = "⭐" * stars
-            return (
-                f"✅ Rated {labourer['name']} — {star_display}\n"
-                f"Their new rating: {new_rating}⭐ ({new_total} total ratings)"
-            )
+
+            # ── Farmer rating their labourer ─────────────────────────────────
+            if farmer and job.get("farmer_phone") == phone:
+                if job.get("rated"):
+                    return "You've already rated this job."
+                labourer_phone = job.get("labourer_phone")
+                if not labourer_phone:
+                    return "❌ No labourer assigned to this job."
+                target = get_from_db("labourers", labourer_phone)
+                if not target:
+                    return "❌ Labourer not found."
+                old_total  = target.get("total_ratings", 0)
+                old_rating = target.get("rating", 0)
+                new_total  = old_total + 1
+                new_rating = round(((old_rating * old_total) + stars) / new_total, 1)
+                update_db("labourers", {"phone": labourer_phone}, {"rating": new_rating, "total_ratings": new_total})
+                update_db("jobs", {"id": job_id}, {"rated": True})
+                star_display = "⭐" * stars
+                return (
+                    f"✅ Rated {target['name']} — {star_display}\n"
+                    f"Their new rating: {new_rating}⭐ ({new_total} total ratings)"
+                )
+
+            # ── Labourer rating their farmer ─────────────────────────────────
+            elif labourer and job.get("labourer_phone") == phone:
+                if job.get("labourer_rated"):
+                    return "You've already rated this job."
+                farmer_phone = job.get("farmer_phone")
+                if not farmer_phone:
+                    return "❌ No farmer found for this job."
+                target = get_from_db("farmers", farmer_phone)
+                if not target:
+                    return "❌ Farmer not found."
+                old_total  = target.get("total_ratings", 0)
+                old_rating = target.get("rating", 0)
+                new_total  = old_total + 1
+                new_rating = round(((old_rating * old_total) + stars) / new_total, 1)
+                update_db("farmers", {"phone": farmer_phone}, {"rating": new_rating, "total_ratings": new_total})
+                update_db("jobs", {"id": job_id}, {"labourer_rated": True})
+                star_display = "⭐" * stars
+                return (
+                    f"✅ Rated {target['name']} — {star_display}\n"
+                    f"Their new rating: {new_rating}⭐ ({new_total} total ratings)"
+                )
+
+            else:
+                return "❌ Job not found or doesn't belong to you."
 
         # ── MY JOBS ───────────────────────────────────────────────────────────
         elif message == "MY JOBS":
@@ -915,6 +1005,16 @@ def handle_message(phone: str, raw_body: str) -> str:
             labourer = get_from_db("labourers", phone)
             if not labourer:
                 return "❌ Only registered labourers can confirm jobs."
+            try:
+                url = f"{SUPABASE_URL}/rest/v1/jobs?id=eq.{job_id}"
+                res = req.get(url, headers=HEADERS, timeout=10)
+                lookup = res.json()
+            except Exception:
+                return "❌ Could not fetch job. Try again."
+            if not lookup:
+                return "❌ Job not found or already confirmed."
+            if lookup[0].get("farmer_phone") == phone:
+                return "❌ You can't confirm your own posted job."
             updated = update_db(
                 "jobs",
                 {"id": job_id, "status": "open"},
@@ -1421,6 +1521,7 @@ Type any message below or tap a quick reply.
   <span class="chip" onclick="quickSend('RENT EQUIPMENT')">RENT EQUIPMENT</span>
   <span class="chip" onclick="quickSend('VIEW EQUIPMENT')">VIEW EQUIPMENT</span>
   <span class="chip" onclick="quickSend('MY LABOURERS')">MY LABOURERS</span>
+  <span class="chip" onclick="quickSend('MY FARMERS')">MY FARMERS</span>
   <span class="chip" onclick="quickSend('MY PROFILE')">MY PROFILE</span>
 </div>
 
