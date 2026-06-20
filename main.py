@@ -713,8 +713,9 @@ def notify_nearby_labourers(job):
         if labourer.get("phone") != job.get("farmer_phone"):
             send_whatsapp(
                 labourer["phone"],
-                f"🔔 New Job Near You in {job['location']}!\n\n"
+                f"🔔 *New Job Near You!*\n\n"
                 f"🔨 Work: {job['work_type']}\n"
+                f"📍 Location: {job['location']}\n"
                 f"👥 Labourers needed: {job['num_labourers']}\n"
                 f"💰 Wage: ₹{job['wage']}/day\n"
                 f"📅 Date: {job['start_date']}\n\n"
@@ -1196,13 +1197,14 @@ def handle_message(phone: str, raw_body: str) -> str:
             jobs = get_open_jobs_by_location(labourer["location"])
             if not jobs:
                 return (
-                    f"No open jobs in {labourer['location']} right now. 😔\n\n"
+                    f"No open jobs near {labourer['location']} right now. 😔\n\n"
                     f"We'll notify you the moment a new job is posted nearby! 🔔"
                 )
-            msg = f"🔍 *Open Jobs in {labourer['location']}:*\n\n"
+            msg = f"🔍 *Open Jobs Near {labourer['location']}:*\n\n"
             for i, job in enumerate(jobs):
                 msg += (
                     f"{i+1}. 🔨 {job['work_type']}\n"
+                    f"   📍 Location: {job['location']}\n"
                     f"   👥 {job['num_labourers']} needed | ₹{job['wage']}/day\n"
                     f"   📅 {job['start_date']}\n"
                     f"   ➡️ Reply CONFIRM {job['id']} to accept\n\n"
