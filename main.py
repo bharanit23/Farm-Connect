@@ -199,11 +199,18 @@ def parse_job_date(raw_text):
             try:
                 candidate = date(year_num, month_num, day_num)
             except ValueError:
-                return None, "❓ That doesn't look like a valid date. Please use a format like '20 June 2026' or 'Tomorrow'."
+                return None, f"❓ That doesn't look like a valid date. Please use a format like '{example_future_date_str()}' or 'Tomorrow'."
             if not year_str and candidate < today:
                 candidate = candidate.replace(year=candidate.year + 1)
             return candidate, None
-    return None, "❓ Couldn't understand that date.\n\nPlease reply with a date like '20 June 2026', '20/06/2026', or 'Tomorrow'."
+    return None, f"❓ Couldn't understand that date.\n\nPlease reply with a date like '{example_future_date_str()}', '{example_future_date_str(fmt='%d/%m/%Y')}', or 'Tomorrow'."
+
+def example_future_date_str(days_ahead: int = 5, fmt: str = "%d %B %Y") -> str:
+    """Always returns a date a few days in the future from *today*, so prompts
+    never show a stale hardcoded example date."""
+    today = date.today()
+    future = today.fromordinal(today.toordinal() + days_ahead)
+    return future.strftime(fmt)
 
 def validate_future_date(raw_text):
     parsed, err = parse_job_date(raw_text)
@@ -402,6 +409,69 @@ def renewal_or_deadline_line(scheme: dict) -> str:
         return "🟢 No fixed deadline — apply anytime."
     return f"📅 Deadline: {scheme['end_date'].strftime('%d %B %Y')}"
 
+# ── Nearby-areas lookup (Option B: curated proximity map, ~20km clusters) ────
+# Real radius/GPS matching needs lat/long + an external geocoding API (a
+# planned Phase 2 upgrade). For now, each key maps to towns/villages within
+# roughly 20km, so a job posted in one town also reaches labourers/farmers
+# registered in its nearby cluster — not just an exact text match.
+#
+# Seeded with verified data for Tiruchengode taluk / Namakkal district
+# (the primary test region). Add more clusters here as the user base grows
+# into other districts — each entry should list places within ~20km of the key.
+NEARBY_AREAS = {
+    "TIRUCHENGODE": [
+        "Tiruchengode", "Elacipalayam", "Sankari", "Mallasamudram",
+        "Pallipalayam", "Komarapalayam", "Sankaridurg", "Erode",
+        "Karumanur", "Mallasamudram West", "Vennandur",
+    ],
+    "SANKARI": [
+        "Sankari", "Tiruchengode", "Mallasamudram", "Erode", "Komarapalayam",
+    ],
+    "ELACIPALAYAM": [
+        "Elacipalayam", "Tiruchengode", "Sankari",
+    ],
+    "MALLASAMUDRAM": [
+        "Mallasamudram", "Mallasamudram West", "Tiruchengode", "Sankari", "Karumanur",
+    ],
+    "KOMARAPALAYAM": [
+        "Komarapalayam", "Pallipalayam", "Tiruchengode", "Sankari",
+    ],
+    "PALLIPALAYAM": [
+        "Pallipalayam", "Komarapalayam", "Tiruchengode",
+    ],
+    "ERODE": [
+        "Erode", "Tiruchengode", "Sankari", "Perundurai",
+    ],
+    "NAMAKKAL": [
+        "Namakkal", "Tiruchengode", "Rasipuram", "Paramathi Velur",
+    ],
+    "RASIPURAM": [
+        "Rasipuram", "Namakkal", "Tiruchengode",
+    ],
+}
+
+def expand_nearby_locations(location: str) -> list:
+    """Given a town/village name, return the list of place names considered
+    'nearby' (~20km cluster). Always includes the original location itself.
+    Falls back to just the original location if it's not in the curated map,
+    so unmapped areas still work via the old exact-substring behaviour."""
+    key = (location or "").strip().upper()
+    if key in NEARBY_AREAS:
+        return NEARBY_AREAS[key]
+    # Reverse lookup: maybe they registered with a village that's *listed*
+    # inside another cluster's nearby list, even if it's not a top-level key.
+    for cluster_key, places in NEARBY_AREAS.items():
+        if key in [p.upper() for p in places]:
+            return places
+    return [location] if location else []
+
+def build_location_or_filter(location: str) -> str:
+    """Builds a PostgREST 'or=()' filter string matching any place name in
+    the nearby cluster for `location`, using ilike on each."""
+    places = expand_nearby_locations(location)
+    conditions = ",".join(f"location.ilike.{quote(f'%{p}%', safe='')}" for p in places)
+    return f"or=({conditions})"
+
 # ── Database helpers ──────────────────────────────────────────────────────────
 def save_to_db(table, data):
     try:
@@ -458,9 +528,9 @@ def get_jobs_by_phone(phone):
 
 def get_open_jobs_by_location(location):
     try:
-        encoded_location = quote(f"%{location}%", safe="")
+        or_filter = build_location_or_filter(location)
         url = (f"{SUPABASE_URL}/rest/v1/jobs"
-               f"?location=ilike.{encoded_location}&status=eq.open&limit=5")
+               f"?{or_filter}&status=eq.open&limit=5")
         res = req.get(url, headers=HEADERS, timeout=10)
         res.raise_for_status()
         return res.json() if isinstance(res.json(), list) else []
@@ -470,8 +540,8 @@ def get_open_jobs_by_location(location):
 
 def get_labourers_by_location(location):
     try:
-        encoded_location = quote(f"%{location}%", safe="")
-        url = f"{SUPABASE_URL}/rest/v1/labourers?location=ilike.{encoded_location}"
+        or_filter = build_location_or_filter(location)
+        url = f"{SUPABASE_URL}/rest/v1/labourers?{or_filter}"
         res = req.get(url, headers=HEADERS, timeout=10)
         res.raise_for_status()
         return res.json() if isinstance(res.json(), list) else []
@@ -591,9 +661,9 @@ def get_equipment_by_id(equipment_id):
 
 def get_equipment_by_location(location):
     try:
-        encoded_location = quote(f"%{location}%", safe="")
+        or_filter = build_location_or_filter(location)
         url = (f"{SUPABASE_URL}/rest/v1/equipment"
-               f"?location=ilike.{encoded_location}&available=eq.true&limit=10")
+               f"?{or_filter}&available=eq.true&limit=10")
         res = req.get(url, headers=HEADERS, timeout=10)
         res.raise_for_status()
         return res.json() if isinstance(res.json(), list) else []
@@ -615,8 +685,8 @@ def notify_nearby_users_about_equipment(equipment):
     location = equipment["location"]
     farmers  = []
     try:
-        encoded_location = quote(f"%{location}%", safe="")
-        url = f"{SUPABASE_URL}/rest/v1/farmers?location=ilike.{encoded_location}"
+        or_filter = build_location_or_filter(location)
+        url = f"{SUPABASE_URL}/rest/v1/farmers?{or_filter}"
         res = req.get(url, headers=HEADERS, timeout=10)
         res.raise_for_status()
         farmers = res.json() if isinstance(res.json(), list) else []
@@ -761,7 +831,12 @@ def handle_message(phone: str, raw_body: str) -> str:
     elif step == "name":
         sessions[phone]["name"] = raw_body
         sessions[phone]["step"] = "location"
-        return f"Nice to meet you, {raw_body}! 🙏\n\nWhat is your village or town name?"
+        return (
+            f"Nice to meet you, {raw_body}! 🙏\n\n"
+            f"What is your village or town name?\n"
+            f"(We'll also notify you about jobs/equipment in nearby areas, "
+            f"not just an exact match.)"
+        )
 
     elif step == "location":
         sessions[phone]["location"] = raw_body.title()
@@ -1422,7 +1497,7 @@ def handle_message(phone: str, raw_body: str) -> str:
             return "Please enter a valid amount (e.g. 600). What is the wage per day?"
         sessions[phone]["job"]["wage"] = raw_body
         sessions[phone]["step"] = "job_date"
-        return "When do you need them? (e.g. 20 June 2026, Tomorrow)"
+        return f"When do you need them? (e.g. {example_future_date_str()}, Tomorrow)"
 
     elif step == "job_date":
         is_valid, normalized_date, err = validate_future_date(raw_body)
@@ -1471,7 +1546,7 @@ def handle_message(phone: str, raw_body: str) -> str:
         sessions[phone]["step"] = "equip_available_until"
         return (
             "Available until which date?\n"
-            "(e.g. 30 June 2026, Tomorrow, or reply *ongoing* if no end date)"
+            f"(e.g. {example_future_date_str(days_ahead=10)}, Tomorrow, or reply *ongoing* if no end date)"
         )
 
     elif step == "equip_available_until":
