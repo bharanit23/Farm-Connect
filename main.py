@@ -715,7 +715,8 @@ def handle_message(phone: str, raw_body: str) -> str:
                 "2️⃣  Planting\n"
                 "3️⃣  Irrigation\n"
                 "4️⃣  Weeding\n"
-                "5️⃣  General Labour\n\n"
+                "5️⃣  General Labour\n"
+                "6️⃣  Any Work (No Preference)\n\n"
                 "Reply with the number or skill name."
             )
         else:
@@ -741,11 +742,23 @@ def handle_message(phone: str, raw_body: str) -> str:
             "3": "Irrigation", "IRRIGATION": "Irrigation",
             "4": "Weeding", "WEEDING": "Weeding",
             "5": "General Labour", "GENERAL LABOUR": "General Labour",
-            "GENERAL": "General Labour"
+            "GENERAL": "General Labour",
+            "6": "Any Work (No Preference)", "ANY WORK": "Any Work (No Preference)",
+            "ANY WORK (NO PREFERENCE)": "Any Work (No Preference)",
+            "ANY": "Any Work (No Preference)", "FLEXIBLE": "Any Work (No Preference)",
+            "NO PREFERENCE": "Any Work (No Preference)",
         }
         skill = skill_map.get(message)
         if not skill:
-            return "Please reply with a number 1-5 or skill name."
+            return (
+                "Please reply with a number 1-6 or skill name.\n\n"
+                "1️⃣  Harvesting\n"
+                "2️⃣  Planting\n"
+                "3️⃣  Irrigation\n"
+                "4️⃣  Weeding\n"
+                "5️⃣  General Labour\n"
+                "6️⃣  Any Work (No Preference)"
+            )
         saved = save_to_db("labourers", {
             "phone": phone,
             "name": sessions[phone]["name"],
@@ -808,6 +821,7 @@ def handle_message(phone: str, raw_body: str) -> str:
                 return (
                     f"🪪 *My Profile*\n\n"
                     f"👤 Name: {farmer['name']}\n"
+                    f"🧾 Role: Farmer\n"
                     f"📍 Location: {farmer['location']}\n"
                     f"⭐ Rating: {rating_str}\n"
                     f"📋 Total jobs posted: {total_posted}\n\n"
@@ -825,10 +839,11 @@ def handle_message(phone: str, raw_body: str) -> str:
                 return (
                     f"🪪 *My Profile*\n\n"
                     f"👤 Name: {labourer['name']}\n"
+                    f"🧾 Role: Labourer\n"
                     f"📍 Location: {labourer['location']}\n"
-                    f"🛠️ Skill: {labourer.get('skill', 'General')}\n"
+                    f"🛠️ Skill: {labourer.get('skill') or 'Not set — reply HELP if this looks wrong'}\n"
                     f"⭐ Rating: {rating_str}\n"
-                    f"✅ Total jobs done: {total_done}\n\n"
+                    f"✅ Total jobs completed: {total_done}\n\n"
                     f"Reply VIEW JOBS to find more work."
                 )
             return "❌ Please register first. Reply HI to get started."
