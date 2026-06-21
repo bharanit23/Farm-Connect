@@ -96,7 +96,8 @@ KNOWN_COMMANDS = [
     "POST JOB", "MY JOBS", "MY LABOURERS", "MY FARMERS", "VIEW JOBS",
     "CONFIRM", "CANCEL", "RATE", "JOB DONE", "UPDATE SKILL",
     "RENT EQUIPMENT", "VIEW EQUIPMENT", "MY EQUIPMENT", "BOOK EQUIPMENT", "CANCEL EQUIPMENT",
-    "SUBSIDIES", "SUBSIDY", "MY PROFILE", "JOB HISTORY",
+    "SUBSIDIES", "SUBSIDY", "MY PROFILE", "JOB HISTORY", "TODAY", "REHIRE", "MY DAYS",
+    "NO SHOW",
 ]
 
 def fuzzy_suggestion(message, threshold=2):
@@ -120,6 +121,10 @@ def fuzzy_suggestion(message, threshold=2):
         "SUBSIDY":          "Format: SUBSIDY [number]  •  Example: SUBSIDY 2",
         "MY PROFILE":       "Just send: MY PROFILE",
         "JOB HISTORY":      "Just send: JOB HISTORY",
+        "TODAY":            "Just send: TODAY",
+        "REHIRE":           "Format: REHIRE [job_id]  •  Example: REHIRE 12",
+        "MY DAYS":          "Just send: MY DAYS",
+        "NO SHOW":          "Format: NO SHOW [job_id]  •  Example: NO SHOW 12",
     }
     for cmd in KNOWN_COMMANDS:
         if message.startswith(cmd) and message != cmd:
@@ -375,6 +380,18 @@ SUBSIDY_SCHEMES = [
     },
 ]
 
+def schemes_deadline_within(days: int, today: date = None) -> list:
+    """Active schemes whose deadline falls within the next `days` days."""
+    today = today or date.today()
+    result = []
+    for s in active_schemes(today):
+        if s["end_date"] is None:
+            continue
+        delta = (s["end_date"] - today).days
+        if 0 <= delta <= days:
+            result.append(s)
+    return result
+
 def active_schemes(today: date = None) -> list:
     today = today or date.today()
     return [
@@ -472,6 +489,65 @@ def build_location_or_filter(location: str) -> str:
     places = expand_nearby_locations(location)
     conditions = ",".join(f"location.ilike.{quote(f'%{p}%', safe='')}" for p in places)
     return f"or=({conditions})"
+
+# ── Weather (Open-Meteo, no API key needed) ──────────────────────────────────
+# Approximate coordinates for our curated NEARBY_AREAS towns (Namakkal/Erode
+# district belt). Used only for a rain-risk hint when posting a job — best
+# effort, not precision agriculture. Unmapped locations simply skip the check.
+LOCATION_COORDS = {
+    "TIRUCHENGODE":   (11.3814, 77.8949),
+    "SANKARI":        (11.4745, 77.8784),
+    "ELACIPALAYAM":   (11.3667, 77.8167),
+    "MALLASAMUDRAM":  (11.3333, 77.9333),
+    "KOMARAPALAYAM":  (11.4347, 77.7044),
+    "PALLIPALAYAM":   (11.4203, 77.7280),
+    "ERODE":          (11.3410, 77.7172),
+    "NAMAKKAL":       (11.2189, 78.1677),
+    "RASIPURAM":      (11.4612, 78.1881),
+}
+
+def get_rain_risk(location: str, target_date: date):
+    """Returns (chance_percent, label) for rain on target_date at `location`,
+    or None if the location isn't mapped or the API call fails/date is out
+    of forecast range. Uses Open-Meteo's free forecast API (no key)."""
+    key = (location or "").strip().upper()
+    coords = LOCATION_COORDS.get(key)
+    if not coords:
+        return None
+    lat, lon = coords
+    days_ahead = (target_date - date.today()).days
+    if days_ahead < 0 or days_ahead > 15:
+        return None  # outside Open-Meteo's free daily forecast range
+    try:
+        url = (
+            "https://api.open-meteo.com/v1/forecast"
+            f"?latitude={lat}&longitude={lon}"
+            "&daily=precipitation_probability_max"
+            "&timezone=Asia%2FKolkata"
+            f"&forecast_days={max(days_ahead + 1, 1)}"
+        )
+        res = req.get(url, timeout=8)
+        res.raise_for_status()
+        data = res.json()
+        dates = data.get("daily", {}).get("time", [])
+        probs = data.get("daily", {}).get("precipitation_probability_max", [])
+        target_str = target_date.strftime("%Y-%m-%d")
+        if target_str not in dates:
+            return None
+        idx = dates.index(target_str)
+        chance = probs[idx]
+        if chance is None:
+            return None
+        if chance >= 60:
+            label = f"⚠️ {chance}% chance of rain — you may want to plan around it."
+        elif chance >= 30:
+            label = f"🌦️ {chance}% chance of rain."
+        else:
+            label = f"☀️ Low rain risk ({chance}%)."
+        return chance, label
+    except Exception as e:
+        print(f"[WEATHER] get_rain_risk ERROR: {e}")
+        return None
 
 # ── Database helpers ──────────────────────────────────────────────────────────
 def save_to_db(table, data):
@@ -606,14 +682,16 @@ def get_completed_jobs_for_labourer(phone):
         print(f"[DB] get_completed_jobs_for_labourer ERROR: {e}")
         return []
 
-def get_job_history_for_labourer(phone, limit=15):
-    """Full past-job history for a labourer: completed + cancelled jobs they
-    were assigned to (i.e. jobs that reached a final state), most recent first."""
+def get_job_history_for_labourer(phone, limit=30):
+    """Full job history for a labourer: every job they've ever been assigned
+    to (confirmed/ongoing, completed, or cancelled), most recent first within
+    each group. Grouped (not interleaved) so JOB HISTORY can show Ongoing,
+    then Completed, then Cancelled as separate sections."""
     try:
         encoded_phone = quote(phone, safe="")
         url = (f"{SUPABASE_URL}/rest/v1/jobs"
                f"?labourer_phone=eq.{encoded_phone}"
-               f"&status=in.(completed,cancelled)"
+               f"&status=in.(confirmed,completed,cancelled)"
                f"&order=start_date.desc&limit={limit}")
         res = req.get(url, headers=HEADERS, timeout=10)
         res.raise_for_status()
@@ -635,6 +713,14 @@ def count_jobs_posted_by_farmer(phone):
         print(f"[DB] count_jobs_posted_by_farmer ERROR: {e}")
         return 0
 
+def increment_no_show(labourer_phone):
+    """Bumps a labourer's no_show_count by 1. Returns the updated record(s)."""
+    labourer = get_from_db("labourers", labourer_phone)
+    if not labourer:
+        return []
+    current = labourer.get("no_show_count", 0) or 0
+    return update_db("labourers", {"phone": labourer_phone}, {"no_show_count": current + 1})
+
 def count_jobs_done_by_labourer(phone):
     """Total number of jobs actually completed (status=completed) by a labourer."""
     try:
@@ -647,6 +733,67 @@ def count_jobs_done_by_labourer(phone):
         return len(data) if isinstance(data, list) else 0
     except Exception as e:
         print(f"[DB] count_jobs_done_by_labourer ERROR: {e}")
+        return 0
+
+def get_average_wage(work_type, location):
+    """Average wage (₹/day) for a work_type among COMPLETED jobs in the
+    nearby cluster for `location`. Returns None if there's no data yet."""
+    try:
+        or_filter = build_location_or_filter(location)
+        url = (f"{SUPABASE_URL}/rest/v1/jobs"
+               f"?{or_filter}&status=eq.completed"
+               f"&work_type=ilike.{quote(work_type, safe='')}"
+               f"&select=wage")
+        res = req.get(url, headers=HEADERS, timeout=10)
+        res.raise_for_status()
+        rows = res.json()
+        if not isinstance(rows, list) or not rows:
+            return None
+        wages = [float(r["wage"]) for r in rows if r.get("wage") not in (None, "")]
+        if not wages:
+            return None
+        return round(sum(wages) / len(wages))
+    except Exception as e:
+        print(f"[DB] get_average_wage ERROR: {e}")
+        return None
+
+def current_financial_year_bounds(today: date = None):
+    """Indian financial year runs 1 April – 31 March."""
+    today = today or date.today()
+    if today.month >= 4:
+        start = date(today.year, 4, 1)
+        end   = date(today.year + 1, 3, 31)
+    else:
+        start = date(today.year - 1, 4, 1)
+        end   = date(today.year, 3, 31)
+    return start, end
+
+def count_completed_days_in_range(phone, start: date, end: date):
+    """Number of completed jobs (proxy for days worked) for a labourer whose
+    start_date falls within [start, end]. start_date is stored as '%d %B %Y'."""
+    try:
+        encoded_phone = quote(phone, safe="")
+        url = (f"{SUPABASE_URL}/rest/v1/jobs"
+               f"?labourer_phone=eq.{encoded_phone}&status=eq.completed&select=start_date")
+        res = req.get(url, headers=HEADERS, timeout=10)
+        res.raise_for_status()
+        rows = res.json()
+        if not isinstance(rows, list):
+            return 0
+        count = 0
+        for row in rows:
+            raw = row.get("start_date")
+            if not raw:
+                continue
+            try:
+                d = datetime.strptime(raw, "%d %B %Y").date()
+            except ValueError:
+                continue
+            if start <= d <= end:
+                count += 1
+        return count
+    except Exception as e:
+        print(f"[DB] count_completed_days_in_range ERROR: {e}")
         return 0
 
 # ── Equipment DB helpers ──────────────────────────────────────────────────────
@@ -752,10 +899,12 @@ def farmer_menu(name: str) -> str:
         f"╔══════════════════════╗\n"
         f"║  🌾 FARMER MENU      ║\n"
         f"╚══════════════════════╝\n\n"
+        f"📅 TODAY — Your daily digest\n"
         f"📋 POST JOB — Post a new job\n"
         f"📂 MY JOBS — View your posted jobs\n"
         f"👥 MY LABOURERS — Accepted/completed jobs\n"
         f"✅ JOB DONE [id] — Mark a job as completed\n"
+        f"🔁 REHIRE [id] — Invite a past labourer again\n"
         f"🚜 RENT EQUIPMENT — List equipment for rent\n"
         f"🔧 MY EQUIPMENT — View your listings\n"
         f"🏛️ SUBSIDIES — Government schemes\n"
@@ -769,9 +918,11 @@ def labourer_menu(name: str) -> str:
         f"╔══════════════════════╗\n"
         f"║  👷 LABOURER MENU    ║\n"
         f"╚══════════════════════╝\n\n"
+        f"📅 TODAY — Your daily digest\n"
         f"🔍 VIEW JOBS — See jobs near you\n"
         f"👨‍🌾 MY FARMERS — Accepted/completed jobs\n"
         f"📜 JOB HISTORY — Your past jobs\n"
+        f"📊 MY DAYS — MGNREGA day tracker\n"
         f"🚜 VIEW EQUIPMENT — Browse equipment for rent\n"
         f"🏛️ SUBSIDIES — Government schemes\n"
         f"🛠️ UPDATE SKILL — Change your listed skill\n"
@@ -979,10 +1130,12 @@ def handle_message(phone: str, raw_body: str) -> str:
                 total_done = count_jobs_done_by_labourer(phone)
                 rating = labourer.get("rating")
                 total_ratings = labourer.get("total_ratings", 0)
+                no_show = labourer.get("no_show_count", 0)
                 if rating and total_ratings:
                     rating_str = f"{rating}⭐ ({total_ratings} rating{'s' if total_ratings != 1 else ''})"
                 else:
                     rating_str = "No ratings yet"
+                no_show_line = f"⚠️ No-shows reported: {no_show}\n" if no_show else ""
                 return (
                     f"🪪 *My Profile*\n\n"
                     f"👤 Name: {labourer['name']}\n"
@@ -990,7 +1143,8 @@ def handle_message(phone: str, raw_body: str) -> str:
                     f"📍 Location: {labourer['location']}\n"
                     f"🛠️ Skill: {labourer.get('skill') or 'Not set — reply UPDATE SKILL to set it'}\n"
                     f"⭐ Rating: {rating_str}\n"
-                    f"✅ Total jobs completed: {total_done}\n\n"
+                    f"✅ Total jobs completed: {total_done}\n"
+                    f"{no_show_line}\n"
                     f"Reply VIEW JOBS to find more work."
                 )
             return "❌ Please register first. Reply HI to get started."
@@ -1011,13 +1165,16 @@ def handle_message(phone: str, raw_body: str) -> str:
                     labourer_phone = job.get("labourer_phone")
                     labourer = get_from_db("labourers", labourer_phone) if labourer_phone else None
                     labourer_name = labourer["name"] if labourer else "Unknown"
+                    no_show = labourer.get("no_show_count", 0) if labourer else 0
+                    flag = f" ⚠️ {no_show} past no-show(s)" if no_show else ""
                     msg += (
                         f"🔹 Job #{job['id']}\n"
                         f"   Work: {job['work_type']} | Date: {job['start_date']}\n"
-                        f"   Labourer: {labourer_name}\n"
+                        f"   Labourer: {labourer_name}{flag}\n"
                         f"   🕓 In progress\n\n"
                     )
-                msg += "Reply JOB DONE [job_id] once the work is finished.\nExample: JOB DONE 12\n\n"
+                msg += "Reply JOB DONE [job_id] once the work is finished.\nExample: JOB DONE 12\n"
+                msg += "If they didn't show up, reply NO SHOW [job_id] instead.\n\n"
             if completed:
                 msg += "✅ *Completed Jobs:*\n\n"
                 for job in completed:
@@ -1032,10 +1189,49 @@ def handle_message(phone: str, raw_body: str) -> str:
                         f"   Labourer: {labourer_name}{rating_str}\n"
                         f"   {rated}\n\n"
                     )
-                msg += "Reply RATE [job_id] [1-5] to rate a labourer.\nExample: RATE 12 5"
+                msg += "Reply RATE [job_id] [1-5] to rate a labourer.\nExample: RATE 12 5\n"
+                msg += "Worked well with someone? Reply REHIRE [job_id] to invite them again."
             return msg
 
-        # ── MY FARMERS ────────────────────────────────────────────────────────
+        # ── REHIRE ────────────────────────────────────────────────────────────
+        elif message.startswith("REHIRE"):
+            parts = raw_body.split()
+            if len(parts) < 2 or not parts[1].isdigit():
+                return "❓ Couldn't read that.\n\nFormat: REHIRE [job_id]\nExample: REHIRE 12"
+            job_id = parts[1]
+            farmer = get_from_db("farmers", phone)
+            if not farmer:
+                return "❌ Only farmers can use REHIRE."
+            try:
+                url = f"{SUPABASE_URL}/rest/v1/jobs?id=eq.{job_id}"
+                res = req.get(url, headers=HEADERS, timeout=10)
+                lookup = res.json()
+            except Exception:
+                return "❌ Could not fetch that job. Try again."
+            if not lookup or lookup[0].get("farmer_phone") != phone:
+                return "❌ Job not found, or it's not one of your jobs."
+            old_job = lookup[0]
+            labourer_phone = old_job.get("labourer_phone")
+            if not labourer_phone:
+                return "❌ That job doesn't have a labourer on record to rehire."
+            labourer = get_from_db("labourers", labourer_phone)
+            if not labourer:
+                return "❌ Could not find that labourer's profile anymore."
+
+            sessions[phone]["step"] = "rehire_date"
+            sessions[phone]["rehire"] = {
+                "work_type": old_job["work_type"],
+                "num_labourers": old_job.get("num_labourers", 1),
+                "wage": old_job["wage"],
+                "labourer_phone": labourer_phone,
+                "labourer_name": labourer["name"],
+            }
+            return (
+                f"🔁 *Rehire {labourer['name']}*\n\n"
+                f"🔨 Work: {old_job['work_type']}\n"
+                f"💰 Wage: ₹{old_job['wage']}/day (same as last time)\n\n"
+                f"When do you need them? (e.g. {example_future_date_str()}, Tomorrow)"
+            )
         elif message == "MY FARMERS":
             labourer = get_from_db("labourers", phone)
             if not labourer:
@@ -1082,21 +1278,121 @@ def handle_message(phone: str, raw_body: str) -> str:
             history = get_job_history_for_labourer(phone)
             if not history:
                 return "No past jobs yet.\nReply VIEW JOBS to find work."
-            status_icon = {"completed": "✅", "cancelled": "❌"}
-            msg = "📜 *Your Job History:*\n\n"
-            for job in history:
-                icon = status_icon.get(job["status"], "⚪")
+
+            ongoing   = [j for j in history if j["status"] == "confirmed"]
+            completed = [j for j in history if j["status"] == "completed"]
+            cancelled = [j for j in history if j["status"] == "cancelled"]
+
+            def _format_job(job, icon):
                 farmer_phone = job.get("farmer_phone")
                 farmer = get_from_db("farmers", farmer_phone) if farmer_phone else None
                 farmer_name = farmer["name"] if farmer else "Unknown"
-                msg += (
+                return (
                     f"{icon} Job #{job['id']} — {job['work_type']}\n"
                     f"   📍 {job['location']} | 📅 {job['start_date']}\n"
                     f"   👨‍🌾 Farmer: {farmer_name} | ₹{job['wage']}/day\n"
                     f"   Status: {job['status'].upper()}\n\n"
                 )
+
+            msg = "📜 *Your Job History:*\n\n"
+            if ongoing:
+                msg += "🕓 *Ongoing:*\n\n"
+                for job in ongoing:
+                    msg += _format_job(job, "🕓")
+            if completed:
+                msg += "✅ *Completed:*\n\n"
+                for job in completed:
+                    msg += _format_job(job, "✅")
+            if cancelled:
+                msg += "❌ *Cancelled:*\n\n"
+                for job in cancelled:
+                    msg += _format_job(job, "❌")
             msg += "Reply VIEW JOBS to find more work."
             return msg
+
+        # ── TODAY (daily digest, both roles) ─────────────────────────────────
+        elif message == "TODAY":
+            farmer = get_from_db("farmers", phone)
+            if farmer:
+                pending_confirm = get_confirmed_jobs_for_farmer(phone)
+                pending_rate    = [j for j in get_completed_jobs_for_farmer(phone) if not j.get("rated")]
+                deadlines       = schemes_deadline_within(7)
+
+                msg = f"📅 *Today for {farmer['name']}* — {date.today().strftime('%d %B %Y')}\n\n"
+                if pending_confirm:
+                    msg += f"🕓 *{len(pending_confirm)} job(s) in progress:*\n"
+                    for job in pending_confirm[:3]:
+                        msg += f"   • #{job['id']} {job['work_type']} — JOB DONE {job['id']} once finished\n"
+                    msg += "\n"
+                if pending_rate:
+                    msg += f"⭐ *{len(pending_rate)} job(s) waiting for your rating:*\n"
+                    for job in pending_rate[:3]:
+                        msg += f"   • RATE {job['id']} [1-5]\n"
+                    msg += "\n"
+                if deadlines:
+                    msg += "🏛️ *Subsidy deadlines this week:*\n"
+                    for s in deadlines:
+                        msg += f"   • {s['name']} — {days_until(s['end_date'])}\n"
+                    msg += "\n"
+                if not pending_confirm and not pending_rate and not deadlines:
+                    msg += "✅ Nothing urgent today. Reply POST JOB to find labourers.\n"
+                return msg.strip()
+
+            labourer = get_from_db("labourers", phone)
+            if labourer:
+                open_jobs       = get_open_jobs_by_location(labourer["location"])
+                pending_confirm = get_confirmed_jobs_for_labourer(phone)
+                pending_rate    = [j for j in get_completed_jobs_for_labourer(phone) if not j.get("labourer_rated")]
+                deadlines       = schemes_deadline_within(7)
+
+                msg = f"📅 *Today for {labourer['name']}* — {date.today().strftime('%d %B %Y')}\n\n"
+                if open_jobs:
+                    msg += f"🔍 *{len(open_jobs)} open job(s) near {labourer['location']}:*\n"
+                    for job in open_jobs[:3]:
+                        msg += f"   • #{job['id']} {job['work_type']} — ₹{job['wage']}/day — CONFIRM {job['id']}\n"
+                    msg += "\n"
+                if pending_confirm:
+                    msg += f"🕓 *{len(pending_confirm)} job(s) you've accepted, awaiting JOB DONE from farmer:*\n"
+                    for job in pending_confirm[:3]:
+                        msg += f"   • #{job['id']} {job['work_type']} on {job['start_date']}\n"
+                    msg += "\n"
+                if pending_rate:
+                    msg += f"⭐ *{len(pending_rate)} job(s) waiting for your rating:*\n"
+                    for job in pending_rate[:3]:
+                        msg += f"   • RATE {job['id']} [1-5]\n"
+                    msg += "\n"
+                if deadlines:
+                    msg += "🏛️ *Subsidy deadlines this week:*\n"
+                    for s in deadlines:
+                        msg += f"   • {s['name']} — {days_until(s['end_date'])}\n"
+                    msg += "\n"
+                if not open_jobs and not pending_confirm and not pending_rate and not deadlines:
+                    msg += "😔 Nothing nearby right now. We'll notify you when a job is posted.\n"
+                return msg.strip()
+
+            return "❌ Please register first. Reply HI to get started."
+
+        # ── MY DAYS (MGNREGA 100-day entitlement tracker, labourers) ────────
+        elif message == "MY DAYS":
+            labourer = get_from_db("labourers", phone)
+            if not labourer:
+                return "❌ Only registered labourers can check their day count."
+            fy_start, fy_end = current_financial_year_bounds()
+            days_done = count_completed_days_in_range(phone, fy_start, fy_end)
+            days_left = max(0, 100 - days_done)
+            bar_filled = min(20, round((days_done / 100) * 20))
+            bar = "🟩" * bar_filled + "⬜" * (20 - bar_filled)
+            return (
+                f"📊 *MGNREGA-style Day Tracker*\n"
+                f"({fy_start.strftime('%b %Y')} – {fy_end.strftime('%b %Y')})\n\n"
+                f"{bar}\n"
+                f"✅ Days completed via Farm Connect: {days_done}\n"
+                f"🎯 Remaining toward 100-day entitlement: {days_left}\n\n"
+                f"ℹ️ This counts your *completed Farm Connect jobs* this financial year as a rough "
+                f"guide — it does not include MGNREGA work done outside the app. Your official "
+                f"day count is on your Job Card at the Gram Panchayat.\n\n"
+                f"Reply SUBSIDY for the MGNREGA scheme number to see full details."
+            )
 
         # ── JOB DONE ──────────────────────────────────────────────────────────
         elif message.startswith("JOB DONE"):
@@ -1307,6 +1603,35 @@ def handle_message(phone: str, raw_body: str) -> str:
                 f"💰 Wage: ₹{job['wage']}/day\n\n"
                 f"Please arrive on time. Good luck! 💪\n"
                 f"The farmer will mark the job as done once work is finished — that's when ratings open up."
+            )
+
+        # ── NO SHOW ───────────────────────────────────────────────────────────
+        elif message.startswith("NO SHOW"):
+            parts = raw_body.split()
+            if len(parts) < 3 or not parts[2].isdigit():
+                return "❓ Couldn't read that.\n\nFormat: NO SHOW [job_id]\nExample: NO SHOW 12"
+            job_id = parts[2]
+            farmer = get_from_db("farmers", phone)
+            if not farmer:
+                return "❌ Only the farmer who posted the job can report a no-show."
+            updated = update_db(
+                "jobs",
+                {"id": job_id, "farmer_phone": phone, "status": "confirmed"},
+                {"status": "cancelled"}
+            )
+            if not updated:
+                return "❌ Job not found, not yours, or not in an accepted (confirmed) state."
+            job = updated[0]
+            labourer_phone = job.get("labourer_phone")
+            if not labourer_phone:
+                return f"✅ Job #{job_id} marked cancelled, but no labourer was on record to flag."
+            increment_no_show(labourer_phone)
+            labourer = get_from_db("labourers", labourer_phone)
+            labourer_name = labourer["name"] if labourer else "the labourer"
+            return (
+                f"✅ Reported. Job #{job_id} has been cancelled and {labourer_name} "
+                f"has been flagged for not showing up.\n\n"
+                f"Reply POST JOB to re-post this work."
             )
 
         # ── CANCEL JOB ────────────────────────────────────────────────────────
@@ -1542,6 +1867,15 @@ def handle_message(phone: str, raw_body: str) -> str:
             return "Please enter a number. How many labourers do you need?"
         sessions[phone]["job"]["num_labourers"] = int(raw_body)
         sessions[phone]["step"] = "job_wage"
+        farmer = get_from_db("farmers", phone)
+        location = farmer.get("location", "") if farmer else ""
+        avg_wage = get_average_wage(sessions[phone]["job"]["work_type"], location) if location else None
+        if avg_wage:
+            return (
+                f"What is the wage per day? (in ₹)\n\n"
+                f"💡 Average for {sessions[phone]['job']['work_type']} near {location} "
+                f"is ₹{avg_wage}/day (based on completed jobs)."
+            )
         return "What is the wage per day? (in ₹)"
 
     elif step == "job_wage":
@@ -1549,7 +1883,18 @@ def handle_message(phone: str, raw_body: str) -> str:
             return "Please enter a valid amount (e.g. 600). What is the wage per day?"
         sessions[phone]["job"]["wage"] = raw_body
         sessions[phone]["step"] = "job_date"
-        return f"When do you need them? (e.g. {example_future_date_str()}, Tomorrow)"
+        farmer = get_from_db("farmers", phone)
+        location = farmer.get("location", "") if farmer else ""
+        avg_wage = get_average_wage(sessions[phone]["job"]["work_type"], location) if location else None
+        date_prompt = f"When do you need them? (e.g. {example_future_date_str()}, Tomorrow)"
+        if avg_wage:
+            entered = float(raw_body)
+            if entered < avg_wage * 0.8:
+                return (
+                    f"⚠️ That's noticeably below the area average of ₹{avg_wage}/day for this work — "
+                    f"you may get fewer responses.\n\n{date_prompt}"
+                )
+        return date_prompt
 
     elif step == "job_date":
         is_valid, normalized_date, err = validate_future_date(raw_body)
@@ -1575,14 +1920,64 @@ def handle_message(phone: str, raw_body: str) -> str:
         if not saved:
             return "⚠️ Error posting your job. Please try again by sending POST JOB."
         notify_nearby_labourers(saved)
+
+        weather_line = ""
+        parsed_date, _ = parse_job_date(raw_body)
+        if parsed_date:
+            risk = get_rain_risk(location, parsed_date)
+            if risk:
+                _, label = risk
+                weather_line = f"\n🌤️ Weather for {job['start_date']}: {label}\n"
+
         return (
             f"✅ *Job Posted Successfully!*\n\n"
             f"📍 Location: {location}\n"
             f"🔨 Work: {job['work_type']}\n"
             f"👥 Labourers needed: {job['num_labourers']}\n"
             f"💰 Wage: ₹{job['wage']}/day\n"
-            f"📅 Date: {job['start_date']}\n\n"
+            f"📅 Date: {job['start_date']}\n"
+            f"{weather_line}\n"
             f"Notifying nearby labourers now! 🔔"
+        )
+
+    # ── REHIRE FLOW (date + optional wage override) ──────────────────────────
+    elif step == "rehire_date":
+        is_valid, normalized_date, err = validate_future_date(raw_body)
+        if not is_valid:
+            return err
+        rehire = sessions[phone]["rehire"]
+        farmer = get_from_db("farmers", phone)
+        if not farmer:
+            sessions[phone]["step"] = "done"
+            return "❌ Could not find your farmer profile. Please try again."
+        location = farmer.get("location", "Unknown")
+        saved = save_to_db("jobs", {
+            "farmer_phone": phone,
+            "work_type": rehire["work_type"],
+            "num_labourers": rehire["num_labourers"],
+            "wage": rehire["wage"],
+            "start_date": normalized_date,
+            "location": location,
+            "status": "open"
+        })
+        sessions[phone]["step"] = "done"
+        if not saved:
+            return "⚠️ Error sending the rehire invite. Please try again with REHIRE [job_id]."
+        send_whatsapp(
+            rehire["labourer_phone"],
+            f"🔁 *{farmer['name']} wants to rehire you!*\n\n"
+            f"🔨 Work: {rehire['work_type']}\n"
+            f"📍 Location: {location}\n"
+            f"💰 Wage: ₹{rehire['wage']}/day\n"
+            f"📅 Date: {normalized_date}\n\n"
+            f"Reply CONFIRM {saved['id']} to accept this job."
+        )
+        return (
+            f"✅ *Rehire invite sent to {rehire['labourer_name']}!*\n\n"
+            f"🔨 Work: {rehire['work_type']}\n"
+            f"📅 Date: {normalized_date}\n"
+            f"💰 Wage: ₹{rehire['wage']}/day\n\n"
+            f"They'll need to reply CONFIRM {saved['id']} to accept, just like a normal job."
         )
 
     # ── EQUIPMENT LISTING FLOW ────────────────────────────────────────────────
@@ -1653,8 +2048,35 @@ def root():
 
 # ── Twilio webhook ─────────────────────────────────────────────────────────────
 @app.post("/webhook")
-async def whatsapp_webhook(Body: str = Form(...), From: str = Form(...)):
+async def whatsapp_webhook(
+    Body: str = Form(""),
+    From: str = Form(...),
+    NumMedia: str = Form("0"),
+    MediaContentType0: str = Form(None),
+):
     try:
+        # ── Voice note / media fallback ──────────────────────────────────────
+        # Twilio sets NumMedia > 0 for any attached media (voice notes,
+        # images, etc). We don't process audio yet (that's Phase 3 — Voice
+        # AI), so reply with a friendly, on-roadmap message instead of
+        # silently failing on an empty Body.
+        if NumMedia and NumMedia.isdigit() and int(NumMedia) > 0:
+            content_type = (MediaContentType0 or "").lower()
+            if content_type.startswith("audio"):
+                reply = (
+                    "🎙️ We got your voice message!\n\n"
+                    "Voice commands aren't supported yet — that's coming in "
+                    "*Phase 3 (Voice AI)* of Farm Connect. 🚀\n\n"
+                    "For now, please reply with text. Send HELP to see what you can do."
+                )
+            else:
+                reply = (
+                    "📎 We received your attachment, but Farm Connect only "
+                    "understands text messages right now.\n\n"
+                    "Please describe what you need in words, or send HELP for the menu."
+                )
+            return twiml_response(reply)
+
         reply = handle_message(From, Body.strip())
         return twiml_response(reply)
     except Exception:
@@ -1781,6 +2203,7 @@ Type any message below or tap a quick reply.
 
 <div class="chips">
   <span class="chip" onclick="quickSend('Hi')">Hi</span>
+  <span class="chip" onclick="quickSend('TODAY')">TODAY</span>
   <span class="chip" onclick="quickSend('POST JOB')">POST JOB</span>
   <span class="chip" onclick="quickSend('MY JOBS')">MY JOBS</span>
   <span class="chip" onclick="quickSend('VIEW JOBS')">VIEW JOBS</span>
@@ -1790,6 +2213,7 @@ Type any message below or tap a quick reply.
   <span class="chip" onclick="quickSend('MY LABOURERS')">MY LABOURERS</span>
   <span class="chip" onclick="quickSend('MY FARMERS')">MY FARMERS</span>
   <span class="chip" onclick="quickSend('JOB HISTORY')">JOB HISTORY</span>
+  <span class="chip" onclick="quickSend('MY DAYS')">MY DAYS</span>
   <span class="chip" onclick="quickSend('UPDATE SKILL')">UPDATE SKILL</span>
   <span class="chip" onclick="quickSend('MY PROFILE')">MY PROFILE</span>
 </div>
