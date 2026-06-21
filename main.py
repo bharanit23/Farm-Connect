@@ -96,7 +96,7 @@ KNOWN_COMMANDS = [
     "POST JOB", "MY JOBS", "MY LABOURERS", "MY FARMERS", "VIEW JOBS",
     "CONFIRM", "CANCEL", "RATE", "JOB DONE", "UPDATE SKILL",
     "RENT EQUIPMENT", "VIEW EQUIPMENT", "MY EQUIPMENT", "BOOK EQUIPMENT", "CANCEL EQUIPMENT",
-    "SUBSIDIES", "SUBSIDY", "MY PROFILE",
+    "SUBSIDIES", "SUBSIDY", "MY PROFILE", "JOB HISTORY",
 ]
 
 def fuzzy_suggestion(message, threshold=2):
@@ -119,6 +119,7 @@ def fuzzy_suggestion(message, threshold=2):
         "SUBSIDIES":        "Just send: SUBSIDIES",
         "SUBSIDY":          "Format: SUBSIDY [number]  •  Example: SUBSIDY 2",
         "MY PROFILE":       "Just send: MY PROFILE",
+        "JOB HISTORY":      "Just send: JOB HISTORY",
     }
     for cmd in KNOWN_COMMANDS:
         if message.startswith(cmd) and message != cmd:
@@ -605,6 +606,22 @@ def get_completed_jobs_for_labourer(phone):
         print(f"[DB] get_completed_jobs_for_labourer ERROR: {e}")
         return []
 
+def get_job_history_for_labourer(phone, limit=15):
+    """Full past-job history for a labourer: completed + cancelled jobs they
+    were assigned to (i.e. jobs that reached a final state), most recent first."""
+    try:
+        encoded_phone = quote(phone, safe="")
+        url = (f"{SUPABASE_URL}/rest/v1/jobs"
+               f"?labourer_phone=eq.{encoded_phone}"
+               f"&status=in.(completed,cancelled)"
+               f"&order=start_date.desc&limit={limit}")
+        res = req.get(url, headers=HEADERS, timeout=10)
+        res.raise_for_status()
+        return res.json() if isinstance(res.json(), list) else []
+    except Exception as e:
+        print(f"[DB] get_job_history_for_labourer ERROR: {e}")
+        return []
+
 def count_jobs_posted_by_farmer(phone):
     """Total number of jobs ever posted by a farmer (any status)."""
     try:
@@ -754,6 +771,7 @@ def labourer_menu(name: str) -> str:
         f"╚══════════════════════╝\n\n"
         f"🔍 VIEW JOBS — See jobs near you\n"
         f"👨‍🌾 MY FARMERS — Accepted/completed jobs\n"
+        f"📜 JOB HISTORY — Your past jobs\n"
         f"🚜 VIEW EQUIPMENT — Browse equipment for rent\n"
         f"🏛️ SUBSIDIES — Government schemes\n"
         f"🛠️ UPDATE SKILL — Change your listed skill\n"
@@ -1056,6 +1074,30 @@ def handle_message(phone: str, raw_body: str) -> str:
                 msg += "Reply RATE [job_id] [1-5] to rate a farmer.\nExample: RATE 12 5"
             return msg
 
+        # ── JOB HISTORY (labourers) ──────────────────────────────────────────
+        elif message == "JOB HISTORY":
+            labourer = get_from_db("labourers", phone)
+            if not labourer:
+                return "❌ Only registered labourers can view job history."
+            history = get_job_history_for_labourer(phone)
+            if not history:
+                return "No past jobs yet.\nReply VIEW JOBS to find work."
+            status_icon = {"completed": "✅", "cancelled": "❌"}
+            msg = "📜 *Your Job History:*\n\n"
+            for job in history:
+                icon = status_icon.get(job["status"], "⚪")
+                farmer_phone = job.get("farmer_phone")
+                farmer = get_from_db("farmers", farmer_phone) if farmer_phone else None
+                farmer_name = farmer["name"] if farmer else "Unknown"
+                msg += (
+                    f"{icon} Job #{job['id']} — {job['work_type']}\n"
+                    f"   📍 {job['location']} | 📅 {job['start_date']}\n"
+                    f"   👨‍🌾 Farmer: {farmer_name} | ₹{job['wage']}/day\n"
+                    f"   Status: {job['status'].upper()}\n\n"
+                )
+            msg += "Reply VIEW JOBS to find more work."
+            return msg
+
         # ── JOB DONE ──────────────────────────────────────────────────────────
         elif message.startswith("JOB DONE"):
             parts = raw_body.split()
@@ -1195,12 +1237,20 @@ def handle_message(phone: str, raw_body: str) -> str:
             if not labourer:
                 return "❌ Only registered labourers can view jobs."
             jobs = get_open_jobs_by_location(labourer["location"])
+            rating = labourer.get("rating")
+            total_ratings = labourer.get("total_ratings", 0)
+            rating_line = (
+                f"⭐ Your rating: {rating}⭐ ({total_ratings} rating{'s' if total_ratings != 1 else ''})\n\n"
+                if rating and total_ratings else
+                "⭐ Your rating: No ratings yet\n\n"
+            )
             if not jobs:
                 return (
+                    f"{rating_line}"
                     f"No open jobs near {labourer['location']} right now. 😔\n\n"
                     f"We'll notify you the moment a new job is posted nearby! 🔔"
                 )
-            msg = f"🔍 *Open Jobs Near {labourer['location']}:*\n\n"
+            msg = f"🔍 *Open Jobs Near {labourer['location']}:*\n\n{rating_line}"
             for i, job in enumerate(jobs):
                 msg += (
                     f"{i+1}. 🔨 {job['work_type']}\n"
@@ -1739,6 +1789,7 @@ Type any message below or tap a quick reply.
   <span class="chip" onclick="quickSend('VIEW EQUIPMENT')">VIEW EQUIPMENT</span>
   <span class="chip" onclick="quickSend('MY LABOURERS')">MY LABOURERS</span>
   <span class="chip" onclick="quickSend('MY FARMERS')">MY FARMERS</span>
+  <span class="chip" onclick="quickSend('JOB HISTORY')">JOB HISTORY</span>
   <span class="chip" onclick="quickSend('UPDATE SKILL')">UPDATE SKILL</span>
   <span class="chip" onclick="quickSend('MY PROFILE')">MY PROFILE</span>
 </div>
