@@ -737,16 +737,26 @@ def count_jobs_done_by_labourer(phone):
 
 def get_average_wage(work_type, location):
     """Average wage (₹/day) for a work_type among COMPLETED jobs in the
-    nearby cluster for `location`. Returns None if there's no data yet."""
+    nearby cluster for `location`. work_type is free text typed by farmers
+    each time (e.g. "Harvesting" vs "harvest" vs "harvest work"), so we
+    match on the first significant word as a substring (ilike %word%)
+    rather than an exact match, or we'd almost never find historical data.
+    Returns None if there's no data yet."""
     try:
+        words = [w for w in re.findall(r"[A-Za-z]+", work_type or "") if len(w) >= 3]
+        if not words:
+            return None
+        key_word = words[0]
         or_filter = build_location_or_filter(location)
         url = (f"{SUPABASE_URL}/rest/v1/jobs"
                f"?{or_filter}&status=eq.completed"
-               f"&work_type=ilike.{quote(work_type, safe='')}"
+               f"&work_type=ilike.{quote(f'%{key_word}%', safe='')}"
                f"&select=wage")
+        print(f"[WAGE] GET {url}")
         res = req.get(url, headers=HEADERS, timeout=10)
         res.raise_for_status()
         rows = res.json()
+        print(f"[WAGE] matched {len(rows) if isinstance(rows, list) else 0} completed job(s) for '{key_word}'")
         if not isinstance(rows, list) or not rows:
             return None
         wages = [float(r["wage"]) for r in rows if r.get("wage") not in (None, "")]
@@ -1218,7 +1228,7 @@ def handle_message(phone: str, raw_body: str) -> str:
             if not labourer:
                 return "❌ Could not find that labourer's profile anymore."
 
-            sessions[phone]["step"] = "rehire_date"
+            sessions[phone]["step"] = "rehire_work_type"
             sessions[phone]["rehire"] = {
                 "work_type": old_job["work_type"],
                 "num_labourers": old_job.get("num_labourers", 1),
@@ -1228,10 +1238,12 @@ def handle_message(phone: str, raw_body: str) -> str:
             }
             return (
                 f"🔁 *Rehire {labourer['name']}*\n\n"
-                f"🔨 Work: {old_job['work_type']}\n"
-                f"💰 Wage: ₹{old_job['wage']}/day (same as last time)\n\n"
-                f"When do you need them? (e.g. {example_future_date_str()}, Tomorrow)"
+                f"Let's set up the new job. You can change any detail, or reply "
+                f"*SAME* / *KEEP* at each step to reuse the last value.\n\n"
+                f"🔨 Work type (last time: *{old_job['work_type']}*):"
             )
+
+        # ── MY FARMERS ────────────────────────────────────────────────────────
         elif message == "MY FARMERS":
             labourer = get_from_db("labourers", phone)
             if not labourer:
@@ -1940,7 +1952,38 @@ def handle_message(phone: str, raw_body: str) -> str:
             f"Notifying nearby labourers now! 🔔"
         )
 
-    # ── REHIRE FLOW (date + optional wage override) ──────────────────────────
+    # ── REHIRE FLOW (editable: work type → labourers → wage → date) ──────────
+    elif step == "rehire_work_type":
+        rehire = sessions[phone]["rehire"]
+        if message not in ("SAME", "KEEP"):
+            rehire["work_type"] = raw_body
+        sessions[phone]["step"] = "rehire_num_labourers"
+        return (
+            f"👥 Number of labourers (last time: *{rehire['num_labourers']}*)\n"
+            f"Reply a number, or SAME to keep it:"
+        )
+
+    elif step == "rehire_num_labourers":
+        rehire = sessions[phone]["rehire"]
+        if message not in ("SAME", "KEEP"):
+            if not raw_body.isdigit():
+                return "Please enter a number, or reply SAME to keep the last value."
+            rehire["num_labourers"] = int(raw_body)
+        sessions[phone]["step"] = "rehire_wage"
+        return (
+            f"💰 Wage per day (last time: *₹{rehire['wage']}/day*)\n"
+            f"Reply a new amount, or SAME to keep it:"
+        )
+
+    elif step == "rehire_wage":
+        rehire = sessions[phone]["rehire"]
+        if message not in ("SAME", "KEEP"):
+            if not raw_body.replace(".", "", 1).isdigit():
+                return "Please enter a valid amount (e.g. 600), or reply SAME to keep the last value."
+            rehire["wage"] = raw_body
+        sessions[phone]["step"] = "rehire_date"
+        return f"📅 When do you need them? (e.g. {example_future_date_str()}, Tomorrow)"
+
     elif step == "rehire_date":
         is_valid, normalized_date, err = validate_future_date(raw_body)
         if not is_valid:
@@ -1968,6 +2011,7 @@ def handle_message(phone: str, raw_body: str) -> str:
             f"🔁 *{farmer['name']} wants to rehire you!*\n\n"
             f"🔨 Work: {rehire['work_type']}\n"
             f"📍 Location: {location}\n"
+            f"👥 Labourers needed: {rehire['num_labourers']}\n"
             f"💰 Wage: ₹{rehire['wage']}/day\n"
             f"📅 Date: {normalized_date}\n\n"
             f"Reply CONFIRM {saved['id']} to accept this job."
@@ -1975,6 +2019,7 @@ def handle_message(phone: str, raw_body: str) -> str:
         return (
             f"✅ *Rehire invite sent to {rehire['labourer_name']}!*\n\n"
             f"🔨 Work: {rehire['work_type']}\n"
+            f"👥 Labourers needed: {rehire['num_labourers']}\n"
             f"📅 Date: {normalized_date}\n"
             f"💰 Wage: ₹{rehire['wage']}/day\n\n"
             f"They'll need to reply CONFIRM {saved['id']} to accept, just like a normal job."
