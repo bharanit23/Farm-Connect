@@ -713,13 +713,40 @@ def count_jobs_posted_by_farmer(phone):
         print(f"[DB] count_jobs_posted_by_farmer ERROR: {e}")
         return 0
 
+PENALTY_AMOUNT = 200  # ₹ — tracked as an owed balance, not yet collected via a payment gateway (Phase 2)
+RATING_PENALTY = 0.5  # stars deducted from current average on a penalty event
+
+def apply_penalty(table: str, phone: str, reason: str):
+    """Applies a standard penalty to a farmer or labourer: adds PENALTY_AMOUNT
+    to their penalty_balance (₹ owed, tracked in-app — no payment gateway
+    yet) and deducts RATING_PENALTY stars from their current rating, floored
+    at 0. Works even if they have zero ratings yet (rating floored at 0,
+    total_ratings left untouched since this isn't a real rating event).
+    Returns the updated record(s) from Supabase."""
+    record = get_from_db(table, phone)
+    if not record:
+        return []
+    current_balance = record.get("penalty_balance", 0) or 0
+    current_rating  = record.get("rating", 0) or 0
+    new_balance = current_balance + PENALTY_AMOUNT
+    new_rating  = max(0, round(current_rating - RATING_PENALTY, 1))
+    print(f"[PENALTY] {table}/{phone} | reason={reason} | "
+          f"balance {current_balance}->{new_balance} | rating {current_rating}->{new_rating}")
+    return update_db(table, {"phone": phone}, {
+        "penalty_balance": new_balance,
+        "rating": new_rating,
+    })
+
 def increment_no_show(labourer_phone):
-    """Bumps a labourer's no_show_count by 1. Returns the updated record(s)."""
+    """Bumps a labourer's no_show_count by 1 and applies the standard
+    no-show penalty (₹ owed + half-star rating drop). Returns the updated
+    record(s)."""
     labourer = get_from_db("labourers", labourer_phone)
     if not labourer:
         return []
     current = labourer.get("no_show_count", 0) or 0
-    return update_db("labourers", {"phone": labourer_phone}, {"no_show_count": current + 1})
+    update_db("labourers", {"phone": labourer_phone}, {"no_show_count": current + 1})
+    return apply_penalty("labourers", labourer_phone, "no_show")
 
 def count_jobs_done_by_labourer(phone):
     """Total number of jobs actually completed (status=completed) by a labourer."""
@@ -1126,13 +1153,16 @@ def handle_message(phone: str, raw_body: str) -> str:
                     rating_str = f"{rating}⭐ ({total_ratings} rating{'s' if total_ratings != 1 else ''})"
                 else:
                     rating_str = "No ratings yet"
+                penalty_balance = farmer.get("penalty_balance", 0) or 0
+                penalty_line = f"⚠️ Penalty owed: ₹{penalty_balance}\n" if penalty_balance else ""
                 return (
                     f"🪪 *My Profile*\n\n"
                     f"👤 Name: {farmer['name']}\n"
                     f"🧾 Role: Farmer\n"
                     f"📍 Location: {farmer['location']}\n"
                     f"⭐ Rating: {rating_str}\n"
-                    f"📋 Total jobs posted: {total_posted}\n\n"
+                    f"📋 Total jobs posted: {total_posted}\n"
+                    f"{penalty_line}\n"
                     f"Reply POST JOB to post a new job."
                 )
             labourer = get_from_db("labourers", phone)
@@ -1146,6 +1176,8 @@ def handle_message(phone: str, raw_body: str) -> str:
                 else:
                     rating_str = "No ratings yet"
                 no_show_line = f"⚠️ No-shows reported: {no_show}\n" if no_show else ""
+                penalty_balance = labourer.get("penalty_balance", 0) or 0
+                penalty_line = f"⚠️ Penalty owed: ₹{penalty_balance}\n" if penalty_balance else ""
                 return (
                     f"🪪 *My Profile*\n\n"
                     f"👤 Name: {labourer['name']}\n"
@@ -1154,7 +1186,8 @@ def handle_message(phone: str, raw_body: str) -> str:
                     f"🛠️ Skill: {labourer.get('skill') or 'Not set — reply UPDATE SKILL to set it'}\n"
                     f"⭐ Rating: {rating_str}\n"
                     f"✅ Total jobs completed: {total_done}\n"
-                    f"{no_show_line}\n"
+                    f"{no_show_line}"
+                    f"{penalty_line}\n"
                     f"Reply VIEW JOBS to find more work."
                 )
             return "❌ Please register first. Reply HI to get started."
@@ -1640,9 +1673,21 @@ def handle_message(phone: str, raw_body: str) -> str:
             increment_no_show(labourer_phone)
             labourer = get_from_db("labourers", labourer_phone)
             labourer_name = labourer["name"] if labourer else "the labourer"
+            send_whatsapp(
+                labourer_phone,
+                f"⚠️ *No-Show Reported*\n\n"
+                f"The farmer for Job #{job_id} ({job['work_type']}) has reported that you "
+                f"did not show up.\n\n"
+                f"📉 A ₹{PENALTY_AMOUNT} penalty has been added to your account and your "
+                f"rating has been reduced by {RATING_PENALTY}⭐.\n\n"
+                f"If you believe this was reported in error, please contact support.\n"
+                f"Reply VIEW JOBS to find more work."
+            )
             return (
                 f"✅ Reported. Job #{job_id} has been cancelled and {labourer_name} "
                 f"has been flagged for not showing up.\n\n"
+                f"📉 A ₹{PENALTY_AMOUNT} penalty and a {RATING_PENALTY}⭐ rating drop have "
+                f"been applied to their account.\n\n"
                 f"Reply POST JOB to re-post this work."
             )
 
@@ -1661,16 +1706,26 @@ def handle_message(phone: str, raw_body: str) -> str:
                 return "❌ Job not found or you don't own this job."
             job = updated[0]
             labourer_phone = job.get("labourer_phone")
+            penalty_line = ""
+            # Only penalize the farmer if a labourer had already accepted
+            # (i.e. the job was CONFIRMED, not just an open/unmatched post).
+            # A plain cancel of an open job with no labourer stays penalty-free.
             if labourer_phone:
+                apply_penalty("farmers", phone, "cancel_confirmed_job")
+                penalty_line = (
+                    f"\n📉 Since a labourer had already accepted this job, a ₹{PENALTY_AMOUNT} "
+                    f"penalty and a {RATING_PENALTY}⭐ rating drop have been applied to your account."
+                )
                 send_whatsapp(
                     labourer_phone,
                     f"⚠️ *Job Cancelled*\n\n"
                     f"🔨 Work: {job['work_type']}\n"
                     f"📍 Location: {job['location']}\n"
                     f"📅 Date: {job['start_date']}\n\n"
-                    f"This job has been cancelled by the farmer. Sorry for the inconvenience."
+                    f"This job has been cancelled by the farmer after you had already accepted it. "
+                    f"Sorry for the inconvenience — the farmer has been penalized for this cancellation."
                 )
-            return f"✅ Job #{job_id} has been cancelled."
+            return f"✅ Job #{job_id} has been cancelled.{penalty_line}"
 
         # ── RENT EQUIPMENT ────────────────────────────────────────────────────
         elif message == "RENT EQUIPMENT":
