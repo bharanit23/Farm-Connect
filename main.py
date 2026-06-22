@@ -2214,4 +2214,219 @@ async def reset_session(request: Request):
 @app.get("/test", response_class=HTMLResponse)
 def chat_ui():
     return """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Farm Connect — Web Test</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', sans-serif; background: #0b141a; color: #e9edef; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 
+  .header { background: #202c33; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #313d45; flex-shrink: 0; }
+  .header-left { display: flex; align-items: center; gap: 10px; }
+  .avatar { width: 40px; height: 40px; border-radius: 50%; background: #00a884; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+  .header h1 { font-size: 16px; color: #e9edef; }
+  .header span { color: #8696a0; font-size: 12px; }
+  .badge { background: #00a884; color: white; font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+
+  .phone-bar { background: #111b21; padding: 8px 16px; border-bottom: 1px solid #313d45; display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
+  .phone-bar label { color: #8696a0; font-size: 12px; white-space: nowrap; }
+  .phone-bar select, .phone-bar input[type=text] { background: #2a3942; border: 1px solid #3b4a54; color: #e9edef; padding: 5px 10px; border-radius: 6px; font-size: 12px; outline: none; }
+  .phone-bar select { flex: 1; min-width: 160px; }
+  .phone-bar input[type=text] { flex: 2; min-width: 160px; }
+  .btn { border: none; color: white; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; white-space: nowrap; }
+  .btn-reset { background: #ea4335; }
+  .btn-reset:hover { background: #c5221f; }
+
+  #chat { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; background: #0b141a; }
+  #chat::-webkit-scrollbar { width: 5px; }
+  #chat::-webkit-scrollbar-thumb { background: #374248; border-radius: 4px; }
+
+  .bubble-wrap { display: flex; flex-direction: column; }
+  .bubble-wrap.sent  { align-items: flex-end; }
+  .bubble-wrap.recv  { align-items: flex-start; }
+
+  .bubble { max-width: 72%; padding: 7px 12px 4px; border-radius: 8px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; position: relative; }
+  .sent .bubble  { background: #005c4b; border-bottom-right-radius: 2px; }
+  .recv .bubble  { background: #202c33; border-bottom-left-radius: 2px; }
+  .bubble .time  { font-size: 10px; color: #8696a0; margin-top: 2px; text-align: right; }
+
+  .typing { color: #8696a0; font-size: 13px; font-style: italic; padding: 4px 0 4px 4px; }
+
+  .input-bar { background: #202c33; padding: 10px 14px; display: flex; gap: 10px; align-items: flex-end; border-top: 1px solid #313d45; flex-shrink: 0; }
+  #msg { flex: 1; background: #2a3942; border: none; color: #e9edef; padding: 10px 14px; border-radius: 24px; font-size: 14px; outline: none; resize: none; max-height: 120px; overflow-y: auto; line-height: 1.4; }
+  #msg::placeholder { color: #8696a0; }
+  #send { background: #00a884; border: none; color: white; width: 44px; height: 44px; border-radius: 50%; cursor: pointer; font-size: 18px; flex-shrink: 0; transition: background 0.15s; }
+  #send:hover { background: #06cf9c; }
+  #send:disabled { background: #3b4a54; cursor: default; }
+
+  /* Quick-reply chips */
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 16px; background: #111b21; border-top: 1px solid #1f2c33; flex-shrink: 0; }
+  .chip { background: #2a3942; border: 1px solid #3b4a54; color: #aebac1; font-size: 11px; padding: 4px 10px; border-radius: 14px; cursor: pointer; transition: background 0.15s; user-select: none; }
+  .chip:hover { background: #3b4a54; color: #e9edef; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <div class="avatar">🌾</div>
+    <div>
+      <h1>Farm Connect Bot</h1>
+      <span>Web Test Interface</span>
+    </div>
+  </div>
+  <span class="badge">TEST MODE</span>
+</div>
+
+<div class="phone-bar">
+  <label>Testing as:</label>
+  <select id="phonePreset" onchange="updatePhone()">
+    <option value="whatsapp:+918754176823">Bharani T (+91 8754176823)</option>
+    <option value="whatsapp:+919942149060">User 2 (+91 9942149060)</option>
+    <option value="web_farmer_test">New Farmer (fresh)</option>
+    <option value="web_labourer_test">New Labourer (fresh)</option>
+    <option value="custom">Custom phone...</option>
+  </select>
+  <input type="text" id="customPhone" placeholder="e.g. whatsapp:+91XXXXXXXXXX" style="display:none">
+  <button class="btn btn-reset" onclick="resetSession()">🔄 Reset Session</button>
+</div>
+
+<div id="chat">
+  <div class="bubble-wrap recv">
+    <div class="bubble">👋 Welcome to Farm Connect Web Tester!
+Type any message below or tap a quick reply.
+<div class="time">now</div></div>
+  </div>
+</div>
+
+<div class="chips">
+  <span class="chip" onclick="quickSend('Hi')">Hi</span>
+  <span class="chip" onclick="quickSend('TODAY')">TODAY</span>
+  <span class="chip" onclick="quickSend('POST JOB')">POST JOB</span>
+  <span class="chip" onclick="quickSend('MY JOBS')">MY JOBS</span>
+  <span class="chip" onclick="quickSend('VIEW JOBS')">VIEW JOBS</span>
+  <span class="chip" onclick="quickSend('SUBSIDIES')">SUBSIDIES</span>
+  <span class="chip" onclick="quickSend('RENT EQUIPMENT')">RENT EQUIPMENT</span>
+  <span class="chip" onclick="quickSend('VIEW EQUIPMENT')">VIEW EQUIPMENT</span>
+  <span class="chip" onclick="quickSend('MY LABOURERS')">MY LABOURERS</span>
+  <span class="chip" onclick="quickSend('MY FARMERS')">MY FARMERS</span>
+  <span class="chip" onclick="quickSend('JOB HISTORY')">JOB HISTORY</span>
+  <span class="chip" onclick="quickSend('MY DAYS')">MY DAYS</span>
+  <span class="chip" onclick="quickSend('UPDATE SKILL')">UPDATE SKILL</span>
+  <span class="chip" onclick="quickSend('MY PROFILE')">MY PROFILE</span>
+</div>
+
+<div class="input-bar">
+  <textarea id="msg" rows="1" placeholder="Type a message..."></textarea>
+  <button id="send" onclick="sendMessage()">➤</button>
+</div>
+
+<script>
+  function getPhone() {
+    const preset = document.getElementById('phonePreset').value;
+    if (preset === 'custom') return document.getElementById('customPhone').value.trim() || 'custom_test';
+    return preset;
+  }
+
+  function updatePhone() {
+    const custom = document.getElementById('customPhone');
+    custom.style.display = document.getElementById('phonePreset').value === 'custom' ? 'inline' : 'none';
+  }
+
+  function nowTime() {
+    return new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+  }
+
+  function addBubble(text, type) {
+    const chat = document.getElementById('chat');
+    const wrap = document.createElement('div');
+    wrap.className = `bubble-wrap ${type}`;
+    wrap.innerHTML = `<div class="bubble">${escHtml(text)}<div class="time">${nowTime()}</div></div>`;
+    chat.appendChild(wrap);
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  // Escape HTML first, then turn any https:// URLs into clickable links.
+  // WhatsApp auto-linkifies URLs natively; this does the same for the web UI.
+  function escHtml(str) {
+    let s = str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    s = s.replace(/(https?:\/\/[^\s<]+)/g,
+      '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#53bdeb;text-decoration:underline;">$1</a>');
+    return s;
+  }
+
+  function showTyping() {
+    const chat = document.getElementById('chat');
+    const el = document.createElement('div');
+    el.id = 'typing';
+    el.className = 'typing';
+    el.textContent = 'Bot is typing...';
+    chat.appendChild(el);
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  function hideTyping() {
+    const el = document.getElementById('typing');
+    if (el) el.remove();
+  }
+
+  async function sendMessage(overrideText) {
+    const input  = document.getElementById('msg');
+    const btn    = document.getElementById('send');
+    const text   = overrideText || input.value.trim();
+    if (!text) return;
+
+    const phone = getPhone();
+    if (!overrideText) { input.value = ''; input.style.height = 'auto'; }
+    addBubble(text, 'sent');
+    btn.disabled = true;
+    showTyping();
+
+    try {
+      const res  = await fetch('/chat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({phone, message: text})
+      });
+      const data = await res.json();
+      hideTyping();
+      addBubble(data.reply, 'recv');
+    } catch(e) {
+      hideTyping();
+      addBubble('⚠️ Could not reach bot. Is Render running?', 'recv');
+    } finally {
+      btn.disabled = false;
+      input.focus();
+    }
+  }
+
+  function quickSend(text) {
+    sendMessage(text);
+  }
+
+  async function resetSession() {
+    const phone = getPhone();
+    try {
+      await fetch('/reset', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({phone})
+      });
+    } catch(e) {}
+    document.getElementById('chat').innerHTML = '';
+    addBubble(`Session reset for ${phone}.\\nSay Hi to start fresh! 👋`, 'recv');
+  }
+
+  const msgEl = document.getElementById('msg');
+  msgEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  });
+  msgEl.addEventListener('input', function() {
+    this.style.height = 'auto';
+    this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+  });
+</script>
+</body>
+</html>"""
