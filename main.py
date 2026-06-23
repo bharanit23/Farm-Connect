@@ -50,6 +50,9 @@ HEADERS = {
 sessions = {}
 
 # ── Language preference store (phone → "EN" | "TA" | "HI") ──────────────────
+# Persisted per session; for WhatsApp users this survives across messages
+# because `sessions` is in-memory and long-lived on Render.
+# Phase 2: persist to Supabase user profile so it survives restarts.
 LANG_PREFS: dict[str, str] = {}   # phone → language code
 
 SUPPORTED_LANGS = {
@@ -65,8 +68,13 @@ def get_lang(phone: str) -> str:
 def set_lang(phone: str, lang: str):
     LANG_PREFS[phone] = lang
 
-# ── Central translation dictionary ────────────────────────────────────────────
+# ── Translations ──────────────────────────────────────────────────────────────
+# Key messages translated into Tamil and Hindi.
+# English is always the fallback and the source of truth.
+# Only status/notification messages here — menus are built by dedicated
+# functions below so they can embed translated labels directly.
 T = {
+    # Registration
     "welcome_new": {
         "EN": (
             "🌾 *Welcome to Farm Connect!*\n\n"
@@ -99,7 +107,8 @@ T = {
         "EN": (
             "Nice to meet you, {name}! 🙏\n\n"
             "What is your village or town name?\n"
-            "(We'll also notify you about jobs/equipment in nearby areas, not just an exact match.)"
+            "(We'll also notify you about jobs/equipment in nearby areas, "
+            "not just an exact match.)"
         ),
         "TA": (
             "{name} அவர்களே, சந்தித்ததில் மகிழ்ச்சி! 🙏\n\n"
@@ -122,18 +131,37 @@ T = {
         "TA": "✅ *தொழிலாளராக பதிவு செய்யப்பட்டது!*\n\n👤 பெயர்: {name}\n📍 இடம்: {location}\n🛠️ திறன்: {skill}\n\nஉங்களுக்கு அருகிலுள்ள வேலைகளை காண VIEW JOBS அனுப்பவும்! 💪",
         "HI": "✅ *मजदूर के रूप में पंजीकृत!*\n\n👤 नाम: {name}\n📍 स्थान: {location}\n🛠️ कौशल: {skill}\n\nनजदीकी नौकरियाँ देखने के लिए VIEW JOBS भेजें! 💪",
     },
+    "job_confirmed_labourer": {
+        "EN": "✅ *Job Confirmed!*\n\n🔨 Work: {work_type}\n📍 Location: {location}\n📅 Date: {start_date}\n💰 Wage: ₹{wage}/day\n\nPlease arrive on time. Good luck! 💪",
+        "TA": "✅ *வேலை உறுதிப்படுத்தப்பட்டது!*\n\n🔨 வேலை: {work_type}\n📍 இடம்: {location}\n📅 தேதி: {start_date}\n💰 கூலி: ₹{wage}/நாள்\n\nசரியான நேரத்தில் வாருங்கள். வாழ்த்துக்கள்! 💪",
+        "HI": "✅ *नौकरी पक्की हुई!*\n\n🔨 काम: {work_type}\n📍 स्थान: {location}\n📅 तारीख: {start_date}\n💰 मजदूरी: ₹{wage}/दिन\n\nसमय पर पहुँचें। शुभकामनाएँ! 💪",
+    },
+    "no_jobs_nearby": {
+        "EN": "No open jobs near {location} right now. 😔\n\nWe'll notify you the moment a new job is posted nearby! 🔔",
+        "TA": "{location} அருகில் இப்போது எந்த வேலையும் இல்லை. 😔\n\nபுதிய வேலை வந்தவுடன் உடனடியாக தெரிவிப்போம்! 🔔",
+        "HI": "{location} के पास अभी कोई नौकरी नहीं है। 😔\n\nनजदीकी नौकरी मिलते ही सूचित करेंगे! 🔔",
+    },
     "language_prompt": {
         "EN": (
             "🌐 *Choose Your Language / மொழி தேர்வு / भाषा चुनें*\n\n"
-            "1️⃣  தமிழ் (Tamil)\n2️⃣  English\n3️⃣  हिंदी (Hindi)\n\nReply 1, 2, or 3."
+            "1️⃣  தமிழ் (Tamil)\n"
+            "2️⃣  English\n"
+            "3️⃣  हिंदी (Hindi)\n\n"
+            "Reply 1, 2, or 3."
         ),
         "TA": (
             "🌐 *உங்கள் மொழியை தேர்வு செய்யவும்*\n\n"
-            "1️⃣  தமிழ் (Tamil)\n2️⃣  English\n3️⃣  हिंदी (Hindi)\n\n1, 2, அல்லது 3 என்று பதில் அனுப்பவும்."
+            "1️⃣  தமிழ் (Tamil)\n"
+            "2️⃣  English\n"
+            "3️⃣  हिंदी (Hindi)\n\n"
+            "1, 2, அல்லது 3 என்று பதில் அனுப்பவும்."
         ),
         "HI": (
             "🌐 *अपनी भाषा चुनें*\n\n"
-            "1️⃣  தமிழ் (Tamil)\n2️⃣  English\n3️⃣  हिंदी (Hindi)\n\n1, 2 या 3 टाइप करें।"
+            "1️⃣  தமிழ் (Tamil)\n"
+            "2️⃣  English\n"
+            "3️⃣  हिंदी (Hindi)\n\n"
+            "1, 2 या 3 टाइप करें।"
         ),
     },
     "language_set": {
@@ -156,782 +184,17 @@ T = {
         "TA": "⚠️ விவரங்களை சேமிக்க பிழை. மீண்டும் முயற்சிக்கவும்.",
         "HI": "⚠️ विवरण सहेजने में त्रुटि। कृपया पुनः प्रयास करें।",
     },
-    "farmers_only": {
-        "EN": "❌ Only registered farmers can use this command.",
-        "TA": "❌ பதிவு செய்த விவசாயிகள் மட்டுமே இந்த கட்டளையை பயன்படுத்தலாம்.",
-        "HI": "❌ केवल पंजीकृत किसान ही इस आदेश का उपयोग कर सकते हैं।",
-    },
-    "labourers_only": {
-        "EN": "❌ Only registered labourers can use this command.",
-        "TA": "❌ பதிவு செய்த தொழிலாளர்கள் மட்டுமே இந்த கட்டளையை பயன்படுத்தலாம்.",
-        "HI": "❌ केवल पंजीकृत मजदूर ही इस आदेश का उपयोग कर सकते हैं।",
-    },
-    "bad_format_id": {
-        "EN": "❓ Couldn't read that.\n\nFormat: {fmt}\nExample: {ex}",
-        "TA": "❓ புரியவில்லை.\n\nவடிவம்: {fmt}\nஉதாரணம்: {ex}",
-        "HI": "❓ समझ नहीं आया।\n\nप्रारूप: {fmt}\nउदाहरण: {ex}",
-    },
-    "job_not_found": {
-        "EN": "❌ Job not found or you don't own this job.",
-        "TA": "❌ வேலை கிடைக்கவில்லை அல்லது இது உங்கள் வேலை இல்லை.",
-        "HI": "❌ नौकरी नहीं मिली या यह आपकी नौकरी नहीं है।",
-    },
-    "db_fetch_error": {
-        "EN": "❌ Could not fetch data. Please try again.",
-        "TA": "❌ தரவை பெற முடியவில்லை. மீண்டும் முயற்சிக்கவும்.",
-        "HI": "❌ डेटा नहीं मिला। कृपया पुनः प्रयास करें।",
-    },
-    "reply_farmer_or_labourer": {
-        "EN": "Please reply with FARMER or LABOURER only.",
-        "TA": "FARMER அல்லது LABOURER என்று மட்டும் பதில் அனுப்பவும்.",
-        "HI": "कृपया केवल FARMER या LABOURER टाइप करें।",
-    },
-    "already_registered_as": {
-        "EN": "⚠️ This number is already registered as a *{role}* ({name}).\n\nA phone number can only be registered under one role.\n\n{menu}",
-        "TA": "⚠️ இந்த எண் ஏற்கனவே *{role}* ஆக பதிவு செய்யப்பட்டுள்ளது ({name}).\n\nஒரு தொலைபேசி எண் ஒரே ஒரு பாத்திரத்தில் மட்டுமே பதிவு செய்யலாம்.\n\n{menu}",
-        "HI": "⚠️ यह नंबर पहले से *{role}* के रूप में पंजीकृत है ({name})।\n\nएक फ़ोन नंबर केवल एक भूमिका में पंजीकृत हो सकता है।\n\n{menu}",
-    },
-    "skill_invalid": {
-        "EN": "Please reply with a number 1-6 or skill name.\n\n{prompt}",
-        "TA": "1 முதல் 6 வரை ஒரு எண் அல்லது திறன் பெயர் அனுப்பவும்.\n\n{prompt}",
-        "HI": "कृपया 1-6 के बीच कोई नंबर या कौशल का नाम टाइप करें।\n\n{prompt}",
-    },
-    "skill_updated": {
-        "EN": "✅ Your skill has been updated to *{skill}*.\n\nReply VIEW JOBS to see work near you.",
-        "TA": "✅ உங்கள் திறன் *{skill}* ஆக புதுப்பிக்கப்பட்டது.\n\nVIEW JOBS அனுப்பி அருகிலுள்ள வேலைகளை பாருங்கள்.",
-        "HI": "✅ आपका कौशल *{skill}* में अपडेट किया गया।\n\nVIEW JOBS भेजकर पास की नौकरियाँ देखें।",
-    },
-    "skill_update_error": {
-        "EN": "⚠️ Error updating your skill. Please try again by sending UPDATE SKILL.",
-        "TA": "⚠️ திறனை புதுப்பிக்க பிழை. UPDATE SKILL அனுப்பி மீண்டும் முயற்சிக்கவும்.",
-        "HI": "⚠️ कौशल अपडेट करने में त्रुटि। UPDATE SKILL भेजकर पुनः प्रयास करें।",
-    },
-    "update_skill_prompt": {
-        "EN": "🛠️ Your current skill: *{skill}*\n\n{prompt}",
-        "TA": "🛠️ உங்கள் தற்போதைய திறன்: *{skill}*\n\n{prompt}",
-        "HI": "🛠️ आपका वर्तमान कौशल: *{skill}*\n\n{prompt}",
-    },
-    "post_job_start": {
-        "EN": "📋 *Let's post your job!*\n\nWhat type of work is needed?\n(e.g. Harvesting, Planting, Irrigation, Weeding)",
-        "TA": "📋 *வேலையை போடுவோம்!*\n\nஎன்ன வகை வேலை தேவை?\n(உதா: Harvesting, Planting, Irrigation, Weeding)",
-        "HI": "📋 *नौकरी पोस्ट करते हैं!*\n\nकिस प्रकार का काम चाहिए?\n(जैसे: Harvesting, Planting, Irrigation, Weeding)",
-    },
-    "ask_num_labourers": {
-        "EN": "How many labourers do you need?",
-        "TA": "எத்தனை தொழிலாளர்கள் தேவை?",
-        "HI": "कितने मजदूर चाहिए?",
-    },
-    "ask_num_labourers_invalid": {
-        "EN": "Please enter a number. How many labourers do you need?",
-        "TA": "ஒரு எண் உள்ளிடவும். எத்தனை தொழிலாளர்கள் தேவை?",
-        "HI": "कृपया एक संख्या दर्ज करें। कितने मजदूर चाहिए?",
-    },
-    "ask_wage": {
-        "EN": "What is the wage per day? (in ₹)",
-        "TA": "நாளொன்றுக்கு கூலி என்ன? (₹ இல்)",
-        "HI": "प्रति दिन मजदूरी क्या है? (₹ में)",
-    },
-    "ask_wage_with_avg": {
-        "EN": "What is the wage per day? (in ₹)\n\n💡 Average for {work_type} near {location} is ₹{avg}/day (based on completed jobs).",
-        "TA": "நாளொன்றுக்கு கூலி என்ன? (₹ இல்)\n\n💡 {location} அருகில் {work_type} வேலைக்கு சராசரி கூலி ₹{avg}/நாள் (முடிந்த வேலைகள் அடிப்படையில்).",
-        "HI": "प्रति दिन मजदूरी क्या है? (₹ में)\n\n💡 {location} के पास {work_type} के लिए औसत मजदूरी ₹{avg}/दिन है (पूर्ण नौकरियों के आधार पर)।",
-    },
-    "ask_wage_invalid": {
-        "EN": "Please enter a valid amount (e.g. 600). What is the wage per day?",
-        "TA": "சரியான தொகை உள்ளிடவும் (உதா: 600). நாளொன்றுக்கு கூலி என்ன?",
-        "HI": "कृपया एक सही राशि दर्ज करें (जैसे 600)। प्रति दिन मजदूरी क्या है?",
-    },
-    "wage_below_avg": {
-        "EN": "⚠️ That's noticeably below the area average of ₹{avg}/day for this work — you may get fewer responses.\n\n{date_prompt}",
-        "TA": "⚠️ இது இப்பகுதியில் இந்த வேலைக்கான சராசரி ₹{avg}/நாளை விட குறைவாக உள்ளது — குறைவான பதில்கள் வரலாம்.\n\n{date_prompt}",
-        "HI": "⚠️ यह इस काम के क्षेत्र औसत ₹{avg}/दिन से काफी कम है — कम प्रतिक्रियाएँ मिल सकती हैं।\n\n{date_prompt}",
-    },
-    "ask_date": {
-        "EN": "When do you need them? (e.g. {example}, Tomorrow)",
-        "TA": "எந்த தேதியில் தேவை? (உதா: {example}, Tomorrow)",
-        "HI": "कब चाहिए? (जैसे: {example}, Tomorrow)",
-    },
-    "job_posted": {
-        "EN": "✅ *Job Posted Successfully!*\n\n📍 Location: {location}\n🔨 Work: {work_type}\n👥 Labourers needed: {num_labourers}\n💰 Wage: ₹{wage}/day\n📅 Date: {start_date}\n{weather_line}\nNotifying nearby labourers now! 🔔",
-        "TA": "✅ *வேலை வெற்றிகரமாக போடப்பட்டது!*\n\n📍 இடம்: {location}\n🔨 வேலை: {work_type}\n👥 தேவையான தொழிலாளர்கள்: {num_labourers}\n💰 கூலி: ₹{wage}/நாள்\n📅 தேதி: {start_date}\n{weather_line}\nஅருகிலுள்ள தொழிலாளர்களுக்கு தெரிவிக்கிறோம்! 🔔",
-        "HI": "✅ *नौकरी सफलतापूर्वक पोस्ट हुई!*\n\n📍 स्थान: {location}\n🔨 काम: {work_type}\n👥 मजदूर चाहिए: {num_labourers}\n💰 मजदूरी: ₹{wage}/दिन\n📅 तारीख: {start_date}\n{weather_line}\nपास के मजदूरों को सूचित कर रहे हैं! 🔔",
-    },
-    "job_post_error": {
-        "EN": "⚠️ Error posting your job. Please try again by sending POST JOB.",
-        "TA": "⚠️ வேலையை போட பிழை. POST JOB அனுப்பி மீண்டும் முயற்சிக்கவும்.",
-        "HI": "⚠️ नौकरी पोस्ट करने में त्रुटि। POST JOB भेजकर पुनः प्रयास करें।",
-    },
-    "farmer_profile_not_found": {
-        "EN": "❌ Could not find your farmer profile. Please try again.",
-        "TA": "❌ உங்கள் விவசாயி சுயவிவரம் கிடைக்கவில்லை. மீண்டும் முயற்சிக்கவும்.",
-        "HI": "❌ आपकी किसान प्रोफ़ाइल नहीं मिली। कृपया पुनः प्रयास करें।",
-    },
-    "my_jobs_empty": {
-        "EN": "You haven't posted any jobs yet.\nReply POST JOB to post one.",
-        "TA": "நீங்கள் இன்னும் எந்த வேலையும் போடவில்லை.\nPOST JOB அனுப்பி ஒரு வேலை போடுங்கள்.",
-        "HI": "आपने अभी तक कोई नौकरी पोस्ट नहीं की।\nPOST JOB भेजकर एक पोस्ट करें।",
-    },
-    "my_jobs_header": {
-        "EN": "📋 *Your Recent Jobs:*\n\n",
-        "TA": "📋 *உங்கள் சமீபத்திய வேலைகள்:*\n\n",
-        "HI": "📋 *आपकी हालिया नौकरियाँ:*\n\n",
-    },
-    "my_jobs_footer": {
-        "EN": "Reply CANCEL [ID] to cancel a job, or JOB DONE [ID] once work is complete.",
-        "TA": "CANCEL [ID] அனுப்பி வேலையை ரத்து செய்யலாம், அல்லது வேலை முடிந்தால் JOB DONE [ID] அனுப்பவும்.",
-        "HI": "CANCEL [ID] भेजकर नौकरी रद्द करें, या काम पूरा होने पर JOB DONE [ID] भेजें।",
-    },
-    "status_open":      {"EN": "OPEN",      "TA": "திறந்துள்ளது",              "HI": "खुली"},
-    "status_confirmed": {"EN": "CONFIRMED", "TA": "உறுதிப்படுத்தப்பட்டது",   "HI": "पक्की"},
-    "status_completed": {"EN": "COMPLETED", "TA": "முடிந்தது",                "HI": "पूर्ण"},
-    "status_cancelled": {"EN": "CANCELLED", "TA": "ரத்து செய்யப்பட்டது",     "HI": "रद्द"},
-    "no_jobs_nearby": {
-        "EN": "No open jobs near {location} right now. 😔\n\nWe'll notify you the moment a new job is posted nearby! 🔔",
-        "TA": "{location} அருகில் இப்போது எந்த வேலையும் இல்லை. 😔\n\nபுதிய வேலை வந்தவுடன் உடனடியாக தெரிவிப்போம்! 🔔",
-        "HI": "{location} के पास अभी कोई नौकरी नहीं है। 😔\n\nनजदीकी नौकरी मिलते ही सूचित करेंगे! 🔔",
-    },
-    "view_jobs_header": {
-        "EN": "🔍 *Open Jobs Near {location}:*\n\n{rating_line}",
-        "TA": "🔍 *{location} அருகில் திறந்த வேலைகள்:*\n\n{rating_line}",
-        "HI": "🔍 *{location} के पास खुली नौकरियाँ:*\n\n{rating_line}",
-    },
-    "rating_line": {
-        "EN": "⭐ Your rating: {rating}⭐ ({count} rating{s})\n\n",
-        "TA": "⭐ உங்கள் மதிப்பீடு: {rating}⭐ ({count} மதிப்பீடு{s})\n\n",
-        "HI": "⭐ आपकी रेटिंग: {rating}⭐ ({count} रेटिंग{s})\n\n",
-    },
-    "no_rating_yet": {
-        "EN": "⭐ Your rating: No ratings yet\n\n",
-        "TA": "⭐ உங்கள் மதிப்பீடு: இன்னும் மதிப்பீடு இல்லை\n\n",
-        "HI": "⭐ आपकी रेटिंग: अभी कोई रेटिंग नहीं\n\n",
-    },
-    "view_jobs_item": {
-        "EN": "{i}. 🔨 {work_type}\n   📍 Location: {location}\n   👥 {num_labourers} needed | ₹{wage}/day\n   📅 {start_date}\n   ➡️ Reply CONFIRM {job_id} to accept\n\n",
-        "TA": "{i}. 🔨 {work_type}\n   📍 இடம்: {location}\n   👥 {num_labourers} தேவை | ₹{wage}/நாள்\n   📅 {start_date}\n   ➡️ CONFIRM {job_id} அனுப்பி ஏற்றுக்கொள்ளவும்\n\n",
-        "HI": "{i}. 🔨 {work_type}\n   📍 स्थान: {location}\n   👥 {num_labourers} चाहिए | ₹{wage}/दिन\n   📅 {start_date}\n   ➡️ CONFIRM {job_id} भेजकर स्वीकार करें\n\n",
-    },
-    "job_confirmed_labourer": {
-        "EN": "✅ *Job Confirmed!*\n\n🔨 Work: {work_type}\n📍 Location: {location}\n📅 Date: {start_date}\n💰 Wage: ₹{wage}/day\n\nPlease arrive on time. Good luck! 💪",
-        "TA": "✅ *வேலை உறுதிப்படுத்தப்பட்டது!*\n\n🔨 வேலை: {work_type}\n📍 இடம்: {location}\n📅 தேதி: {start_date}\n💰 கூலி: ₹{wage}/நாள்\n\nசரியான நேரத்தில் வாருங்கள். வாழ்த்துக்கள்! 💪",
-        "HI": "✅ *नौकरी पक्की हुई!*\n\n🔨 काम: {work_type}\n📍 स्थान: {location}\n📅 तारीख: {start_date}\n💰 मजदूरी: ₹{wage}/दिन\n\nसमय पर पहुँचें। शुभकामनाएँ! 💪",
-    },
-    "confirm_not_labourer": {
-        "EN": "❌ Only registered labourers can confirm jobs.",
-        "TA": "❌ பதிவு செய்த தொழிலாளர்கள் மட்டுமே வேலைகளை ஏற்றுக்கொள்ளலாம்.",
-        "HI": "❌ केवल पंजीकृत मजदूर ही नौकरी स्वीकार कर सकते हैं।",
-    },
-    "confirm_own_job": {
-        "EN": "❌ You can't confirm your own posted job.",
-        "TA": "❌ நீங்கள் போட்ட வேலையை நீங்களே ஏற்றுக்கொள்ள முடியாது.",
-        "HI": "❌ आप अपनी ही पोस्ट की नौकरी स्वीकार नहीं कर सकते।",
-    },
-    "confirm_already_taken": {
-        "EN": "❌ Job not found or already confirmed.",
-        "TA": "❌ வேலை கிடைக்கவில்லை அல்லது ஏற்கனவே உறுதிப்படுத்தப்பட்டது.",
-        "HI": "❌ नौकरी नहीं मिली या पहले से पक्की हो चुकी है।",
-    },
-    "job_done_not_farmer": {
-        "EN": "❌ Only the farmer who posted the job can mark it as done.",
-        "TA": "❌ வேலையை போட்ட விவசாயி மட்டுமே முடிந்ததாக குறிக்கலாம்.",
-        "HI": "❌ केवल नौकरी पोस्ट करने वाला किसान ही इसे पूर्ण मार्क कर सकता है।",
-    },
-    "job_done_not_found": {
-        "EN": "❌ Job not found, not yours, or not in an accepted state.",
-        "TA": "❌ வேலை கிடைக்கவில்லை, உங்களுடையது இல்லை, அல்லது ஏற்றுக்கொள்ளப்பட்ட நிலையில் இல்லை.",
-        "HI": "❌ नौकरी नहीं मिली, आपकी नहीं है, या स्वीकृत स्थिति में नहीं है।",
-    },
-    "job_done_success": {
-        "EN": "✅ *Job #{job_id} marked as completed!*\n\n🔨 Work: {work_type}\n👤 Labourer: {labourer_name}\n\nPlease rate the labourer:\nReply RATE {job_id} [1-5]\nExample: RATE {job_id} 5",
-        "TA": "✅ *வேலை #{job_id} முடிந்ததாக குறிக்கப்பட்டது!*\n\n🔨 வேலை: {work_type}\n👤 தொழிலாளர்: {labourer_name}\n\nதொழிலாளரை மதிப்பிடவும்:\nRATE {job_id} [1-5] அனுப்பவும்\nஉதாரணம்: RATE {job_id} 5",
-        "HI": "✅ *नौकरी #{job_id} पूर्ण मार्क की गई!*\n\n🔨 काम: {work_type}\n👤 मजदूर: {labourer_name}\n\nमजदूर को रेट करें:\nRATE {job_id} [1-5] भेजें\nउदाहरण: RATE {job_id} 5",
-    },
-    "rate_invalid_format": {
-        "EN": "❓ Couldn't read that.\n\nFormat: RATE [job_id] [stars 1–5]\nExample: RATE 12 5",
-        "TA": "❓ புரியவில்லை.\n\nவடிவம்: RATE [job_id] [மதிப்பு 1–5]\nஉதாரணம்: RATE 12 5",
-        "HI": "❓ समझ नहीं आया।\n\nप्रारूप: RATE [job_id] [स्टार 1–5]\nउदाहरण: RATE 12 5",
-    },
-    "rate_stars_range": {
-        "EN": "Stars must be between 1 and 5.",
-        "TA": "மதிப்பு 1 முதல் 5 வரை இருக்க வேண்டும்.",
-        "HI": "स्टार 1 से 5 के बीच होना चाहिए।",
-    },
-    "rate_job_not_completed": {
-        "EN": "❌ You can only rate jobs after the farmer marks them as JOB DONE.",
-        "TA": "❌ விவசாயி JOB DONE என்று குறித்த பிறகு மட்டுமே மதிப்பிட முடியும்.",
-        "HI": "❌ किसान द्वारा JOB DONE मार्क करने के बाद ही रेट कर सकते हैं।",
-    },
-    "rate_already_rated": {
-        "EN": "You've already rated this job.",
-        "TA": "இந்த வேலையை ஏற்கனவே மதிப்பிட்டுவிட்டீர்கள்.",
-        "HI": "आप इस नौकरी को पहले ही रेट कर चुके हैं।",
-    },
-    "rate_no_labourer": {
-        "EN": "❌ No labourer assigned to this job.",
-        "TA": "❌ இந்த வேலைக்கு எந்த தொழிலாளரும் ஒதுக்கப்படவில்லை.",
-        "HI": "❌ इस नौकरी में कोई मजदूर नियुक्त नहीं है।",
-    },
-    "rate_no_farmer": {
-        "EN": "❌ No farmer found for this job.",
-        "TA": "❌ இந்த வேலைக்கு விவசாயி கிடைக்கவில்லை.",
-        "HI": "❌ इस नौकरी के लिए किसान नहीं मिला।",
-    },
-    "rate_person_not_found": {
-        "EN": "❌ {role} not found.",
-        "TA": "❌ {role} கிடைக்கவில்லை.",
-        "HI": "❌ {role} नहीं मिला।",
-    },
-    "rate_success": {
-        "EN": "✅ Rated {name} — {stars}\nTheir new rating: {new_rating}⭐ ({total} total ratings)",
-        "TA": "✅ {name} க்கு மதிப்பு — {stars}\nபுதிய மதிப்பீடு: {new_rating}⭐ (மொத்தம் {total} மதிப்பீடுகள்)",
-        "HI": "✅ {name} को रेट किया — {stars}\nनई रेटिंग: {new_rating}⭐ (कुल {total} रेटिंग)",
-    },
-    "rate_not_your_job": {
-        "EN": "❌ Job not found or doesn't belong to you.",
-        "TA": "❌ வேலை கிடைக்கவில்லை அல்லது உங்களுடையது இல்லை.",
-        "HI": "❌ नौकरी नहीं मिली या आपकी नहीं है।",
-    },
-    "cancel_success": {
-        "EN": "✅ Job #{job_id} has been cancelled.",
-        "TA": "✅ வேலை #{job_id} ரத்து செய்யப்பட்டது.",
-        "HI": "✅ नौकरी #{job_id} रद्द कर दी गई।",
-    },
-    "cancel_penalty_line": {
-        "EN": "\n📉 Since a labourer had already accepted this job, a ₹{amount} penalty and a {rating_drop}⭐ rating drop have been applied to your account.",
-        "TA": "\n📉 ஒரு தொழிலாளர் ஏற்கனவே ஏற்றுக்கொண்டதால், ₹{amount} அபராதம் மற்றும் {rating_drop}⭐ மதிப்பீடு குறைவு உங்கள் கணக்கில் பதிவு செய்யப்பட்டது.",
-        "HI": "\n📉 एक मजदूर पहले ही स्वीकार कर चुका था, इसलिए ₹{amount} जुर्माना और {rating_drop}⭐ रेटिंग गिरावट आपके खाते में लागू की गई।",
-    },
-    "no_show_not_farmer": {
-        "EN": "❌ Only the farmer who posted the job can report a no-show.",
-        "TA": "❌ வேலையை போட்ட விவசாயி மட்டுமே வராமல் போனதை புகார் செய்யலாம்.",
-        "HI": "❌ केवल नौकरी पोस्ट करने वाला किसान ही नो-शो रिपोर्ट कर सकता है।",
-    },
-    "no_show_not_found": {
-        "EN": "❌ Job not found, not yours, or not in an accepted (confirmed) state.",
-        "TA": "❌ வேலை கிடைக்கவில்லை, உங்களுடையது இல்லை, அல்லது ஏற்றுக்கொள்ளப்பட்ட நிலையில் இல்லை.",
-        "HI": "❌ नौकरी नहीं मिली, आपकी नहीं है, या स्वीकृत स्थिति में नहीं है।",
-    },
-    "no_show_no_labourer": {
-        "EN": "✅ Job #{job_id} marked cancelled, but no labourer was on record to flag.",
-        "TA": "✅ வேலை #{job_id} ரத்தாக குறிக்கப்பட்டது, ஆனால் புகார் செய்ய தொழிலாளர் பதிவு இல்லை.",
-        "HI": "✅ नौकरी #{job_id} रद्द मार्क की गई, लेकिन फ्लैग करने के लिए कोई मजदूर दर्ज नहीं था।",
-    },
-    "no_show_success": {
-        "EN": "✅ Reported. Job #{job_id} has been cancelled and {labourer_name} has been flagged for not showing up.\n\n📉 A ₹{amount} penalty and a {rating_drop}⭐ rating drop have been applied to their account.\n\nReply POST JOB to re-post this work.",
-        "TA": "✅ புகார் செய்யப்பட்டது. வேலை #{job_id} ரத்தாகி {labourer_name} வரவில்லை என்று கொடியிடப்பட்டது.\n\n📉 ₹{amount} அபராதம் மற்றும் {rating_drop}⭐ மதிப்பீடு குறைவு அவர்கள் கணக்கில் பதிவு செய்யப்பட்டது.\n\nPOST JOB அனுப்பி இந்த வேலையை மீண்டும் போடுங்கள்.",
-        "HI": "✅ रिपोर्ट किया गया। नौकरी #{job_id} रद्द हुई और {labourer_name} को नो-शो के लिए फ्लैग किया गया।\n\n📉 ₹{amount} जुर्माना और {rating_drop}⭐ रेटिंग गिरावट उनके खाते में लागू की गई।\n\nPOST JOB भेजकर यह काम दोबारा पोस्ट करें।",
-    },
-    "my_labourers_empty": {
-        "EN": "No accepted jobs found.\nReply POST JOB to post one.",
-        "TA": "ஏற்றுக்கொள்ளப்பட்ட வேலைகள் இல்லை.\nPOST JOB அனுப்பி ஒரு வேலை போடுங்கள்.",
-        "HI": "कोई स्वीकृत नौकरी नहीं मिली।\nPOST JOB भेजकर एक पोस्ट करें।",
-    },
-    "my_labourers_pending_header": {
-        "EN": "👥 *Accepted — Not Yet Completed:*\n\n",
-        "TA": "👥 *ஏற்றுக்கொள்ளப்பட்டது — இன்னும் முடிக்கவில்லை:*\n\n",
-        "HI": "👥 *स्वीकृत — अभी पूर्ण नहीं:*\n\n",
-    },
-    "my_labourers_pending_footer": {
-        "EN": "Reply JOB DONE [job_id] once the work is finished.\nExample: JOB DONE 12\nIf they didn't show up, reply NO SHOW [job_id] instead.\n\n",
-        "TA": "வேலை முடிந்தால் JOB DONE [job_id] அனுப்பவும்.\nஉதாரணம்: JOB DONE 12\nவரவில்லை என்றால் NO SHOW [job_id] அனுப்பவும்.\n\n",
-        "HI": "काम पूरा होने पर JOB DONE [job_id] भेजें।\nउदाहरण: JOB DONE 12\nअगर नहीं आए तो NO SHOW [job_id] भेजें।\n\n",
-    },
-    "my_labourers_completed_header": {
-        "EN": "✅ *Completed Jobs:*\n\n",
-        "TA": "✅ *முடிந்த வேலைகள்:*\n\n",
-        "HI": "✅ *पूर्ण नौकरियाँ:*\n\n",
-    },
-    "my_labourers_completed_footer": {
-        "EN": "Reply RATE [job_id] [1-5] to rate a labourer.\nExample: RATE 12 5\nWorked well with someone? Reply REHIRE [job_id] to invite them again.",
-        "TA": "RATE [job_id] [1-5] அனுப்பி தொழிலாளரை மதிப்பிடவும்.\nஉதாரணம்: RATE 12 5\nநன்றாக வேலை செய்தவரை மீண்டும் REHIRE [job_id] அனுப்பி அழையுங்கள்.",
-        "HI": "RATE [job_id] [1-5] भेजकर मजदूर को रेट करें।\nउदाहरण: RATE 12 5\nअच्छा काम किया? REHIRE [job_id] भेजकर दोबारा बुलाएँ।",
-    },
-    "in_progress":      {"EN": "🕓 In progress",     "TA": "🕓 நடந்துகொண்டிருக்கிறது",  "HI": "🕓 जारी है"},
-    "rated_label":      {"EN": "✅ Rated",            "TA": "✅ மதிப்பிடப்பட்டது",        "HI": "✅ रेट किया गया"},
-    "not_rated_label":  {"EN": "⭐ Not rated yet",    "TA": "⭐ இன்னும் மதிப்பிடவில்லை", "HI": "⭐ अभी रेट नहीं किया"},
-    "no_show_flag":     {"EN": " ⚠️ {count} past no-show(s)", "TA": " ⚠️ {count} முறை வரவில்லை", "HI": " ⚠️ {count} बार नो-शो"},
-    "unknown_name":     {"EN": "Unknown",             "TA": "தெரியவில்லை",                "HI": "अज्ञात"},
-    "my_farmers_empty": {
-        "EN": "No accepted jobs found.\nReply VIEW JOBS to find work.",
-        "TA": "ஏற்றுக்கொள்ளப்பட்ட வேலைகள் இல்லை.\nVIEW JOBS அனுப்பி வேலை தேடுங்கள்.",
-        "HI": "कोई स्वीकृत नौकरी नहीं मिली।\nVIEW JOBS भेजकर काम खोजें।",
-    },
-    "my_farmers_pending_header": {
-        "EN": "👨‍🌾 *Accepted — Not Yet Completed:*\n\n",
-        "TA": "👨‍🌾 *ஏற்றுக்கொள்ளப்பட்டது — இன்னும் முடிக்கவில்லை:*\n\n",
-        "HI": "👨‍🌾 *स्वीकृत — अभी पूर्ण नहीं:*\n\n",
-    },
-    "my_farmers_pending_waiting": {
-        "EN": "🕓 Waiting for farmer to mark JOB DONE",
-        "TA": "🕓 விவசாயி JOB DONE குறிக்க காத்திருக்கிறோம்",
-        "HI": "🕓 किसान द्वारा JOB DONE मार्क करने की प्रतीक्षा है",
-    },
-    "my_farmers_completed_header": {
-        "EN": "✅ *Completed Jobs:*\n\n",
-        "TA": "✅ *முடிந்த வேலைகள்:*\n\n",
-        "HI": "✅ *पूर्ण नौकरियाँ:*\n\n",
-    },
-    "my_farmers_completed_footer": {
-        "EN": "Reply RATE [job_id] [1-5] to rate a farmer.\nExample: RATE 12 5",
-        "TA": "RATE [job_id] [1-5] அனுப்பி விவசாயியை மதிப்பிடவும்.\nஉதாரணம்: RATE 12 5",
-        "HI": "RATE [job_id] [1-5] भेजकर किसान को रेट करें।\nउदाहरण: RATE 12 5",
-    },
-    "job_history_empty": {
-        "EN": "No past jobs yet.\nReply VIEW JOBS to find work.",
-        "TA": "இதுவரை வேலை வரலாறு இல்லை.\nVIEW JOBS அனுப்பி வேலை தேடுங்கள்.",
-        "HI": "अभी तक कोई पुरानी नौकरी नहीं।\nVIEW JOBS भेजकर काम खोजें।",
-    },
-    "job_history_header":    {"EN": "📜 *Your Job History:*\n\n",    "TA": "📜 *உங்கள் வேலை வரலாறு:*\n\n",        "HI": "📜 *आपका नौकरी इतिहास:*\n\n"},
-    "job_history_ongoing":   {"EN": "🕓 *Ongoing:*\n\n",             "TA": "🕓 *நடந்துகொண்டிருக்கிறது:*\n\n",      "HI": "🕓 *जारी:*\n\n"},
-    "job_history_completed": {"EN": "✅ *Completed:*\n\n",           "TA": "✅ *முடிந்தது:*\n\n",                   "HI": "✅ *पूर्ण:*\n\n"},
-    "job_history_cancelled": {"EN": "❌ *Cancelled:*\n\n",           "TA": "❌ *ரத்து செய்யப்பட்டது:*\n\n",       "HI": "❌ *रद्द:*\n\n"},
-    "job_history_footer": {
-        "EN": "Reply VIEW JOBS to find more work.",
-        "TA": "VIEW JOBS அனுப்பி மேலும் வேலைகளை தேடுங்கள்.",
-        "HI": "VIEW JOBS भेजकर और नौकरियाँ खोजें।",
-    },
-    "today_header_farmer": {
-        "EN": "📅 *Today for {name}* — {date}\n\n",
-        "TA": "📅 *{name} அவர்களுக்கு இன்று* — {date}\n\n",
-        "HI": "📅 *{name} के लिए आज* — {date}\n\n",
-    },
-    "today_header_labourer": {
-        "EN": "📅 *Today for {name}* — {date}\n\n",
-        "TA": "📅 *{name} அவர்களுக்கு இன்று* — {date}\n\n",
-        "HI": "📅 *{name} के लिए आज* — {date}\n\n",
-    },
-    "today_in_progress": {
-        "EN": "🕓 *{count} job(s) in progress:*\n",
-        "TA": "🕓 *{count} வேலை நடந்துகொண்டிருக்கிறது:*\n",
-        "HI": "🕓 *{count} नौकरी जारी:*\n",
-    },
-    "today_pending_rate": {
-        "EN": "⭐ *{count} job(s) waiting for your rating:*\n",
-        "TA": "⭐ *{count} வேலை உங்கள் மதிப்பீட்டிற்காக காத்திருக்கிறது:*\n",
-        "HI": "⭐ *{count} नौकरी आपकी रेटिंग का इंतजार:*\n",
-    },
-    "today_subsidy_deadlines": {
-        "EN": "🏛️ *Subsidy deadlines this week:*\n",
-        "TA": "🏛️ *இந்த வாரம் திட்ட கடைசி தேதிகள்:*\n",
-        "HI": "🏛️ *इस हफ्ते योजना की अंतिम तारीखें:*\n",
-    },
-    "today_nothing_farmer": {
-        "EN": "✅ Nothing urgent today. Reply POST JOB to find labourers.\n",
-        "TA": "✅ இன்று அவசரம் ஒன்றும் இல்லை. POST JOB அனுப்பி தொழிலாளர்களை தேடுங்கள்.\n",
-        "HI": "✅ आज कुछ जरूरी नहीं। POST JOB भेजकर मजदूर खोजें।\n",
-    },
-    "today_open_jobs": {
-        "EN": "🔍 *{count} open job(s) near {location}:*\n",
-        "TA": "🔍 *{location} அருகில் {count} திறந்த வேலை:*\n",
-        "HI": "🔍 *{location} के पास {count} खुली नौकरी:*\n",
-    },
-    "today_accepted_jobs": {
-        "EN": "🕓 *{count} job(s) you've accepted, awaiting JOB DONE from farmer:*\n",
-        "TA": "🕓 *நீங்கள் ஏற்றுக்கொண்ட {count} வேலை, விவசாயி JOB DONE குறிக்க காத்திருக்கிறது:*\n",
-        "HI": "🕓 *आपने स्वीकार की {count} नौकरी, किसान के JOB DONE का इंतजार:*\n",
-    },
-    "today_nothing_labourer": {
-        "EN": "😔 Nothing nearby right now. We'll notify you when a job is posted.\n",
-        "TA": "😔 இப்போது அருகில் எதுவும் இல்லை. வேலை வந்தவுடன் தெரிவிப்போம்.\n",
-        "HI": "😔 अभी पास में कुछ नहीं। नौकरी पोस्ट होते ही सूचित करेंगे।\n",
-    },
-    "my_days_result": {
-        "EN": (
-            "📊 *MGNREGA-style Day Tracker*\n({fy_start} – {fy_end})\n\n{bar}\n"
-            "✅ Days completed via Farm Connect: {days_done}\n"
-            "🎯 Remaining toward 100-day entitlement: {days_left}\n\n"
-            "ℹ️ This counts your *completed Farm Connect jobs* this financial year as a rough guide — "
-            "it does not include MGNREGA work done outside the app. Your official day count is on your Job Card at the Gram Panchayat.\n\n"
-            "Reply SUBSIDY for the MGNREGA scheme number to see full details."
-        ),
-        "TA": (
-            "📊 *MGNREGA-நாள் கணக்கு*\n({fy_start} – {fy_end})\n\n{bar}\n"
-            "✅ Farm Connect மூலம் முடித்த நாட்கள்: {days_done}\n"
-            "🎯 100 நாட்களுக்கு இன்னும் தேவை: {days_left}\n\n"
-            "ℹ️ இது இந்த நிதியாண்டில் Farm Connect-ல் *முடிந்த வேலைகளை* மட்டும் எண்ணுகிறது — "
-            "வெளியே செய்த MGNREGA வேலைகள் இதில் சேராது. அதிகாரபூர்வ எண்ணிக்கை கிராம பஞ்சாயத்தில் உங்கள் Job Card-ல் இருக்கும்.\n\n"
-            "MGNREGA திட்ட விவரத்திற்கு SUBSIDY அனுப்பவும்."
-        ),
-        "HI": (
-            "📊 *MGNREGA-शैली दिन ट्रैकर*\n({fy_start} – {fy_end})\n\n{bar}\n"
-            "✅ Farm Connect से पूर्ण दिन: {days_done}\n"
-            "🎯 100-दिन के अधिकार में शेष: {days_left}\n\n"
-            "ℹ️ यह इस वित्तीय वर्ष में Farm Connect पर *पूर्ण नौकरियों* की गिनती है — "
-            "ऐप के बाहर किए गए MGNREGA काम इसमें शामिल नहीं हैं। आधिकारिक गिनती ग्राम पंचायत में आपके Job Card पर होगी।\n\n"
-            "MGNREGA योजना विवरण के लिए SUBSIDY भेजें।"
-        ),
-    },
-    "profile_farmer": {
-        "EN": (
-            "🪪 *My Profile*\n\n👤 Name: {name}\n🧾 Role: Farmer\n📍 Location: {location}\n"
-            "⭐ Rating: {rating_str}\n📋 Total jobs posted: {total_posted}\n🌐 Language: {lang_label}\n"
-            "{penalty_line}\nReply POST JOB to post a new job."
-        ),
-        "TA": (
-            "🪪 *என் சுயவிவரம்*\n\n👤 பெயர்: {name}\n🧾 பாத்திரம்: விவசாயி\n📍 இடம்: {location}\n"
-            "⭐ மதிப்பீடு: {rating_str}\n📋 மொத்தம் போட்ட வேலைகள்: {total_posted}\n🌐 மொழி: {lang_label}\n"
-            "{penalty_line}\nPOST JOB அனுப்பி புதிய வேலை போடுங்கள்."
-        ),
-        "HI": (
-            "🪪 *मेरी प्रोफ़ाइल*\n\n👤 नाम: {name}\n🧾 भूमिका: किसान\n📍 स्थान: {location}\n"
-            "⭐ रेटिंग: {rating_str}\n📋 कुल पोस्ट नौकरियाँ: {total_posted}\n🌐 भाषा: {lang_label}\n"
-            "{penalty_line}\nPOST JOB भेजकर नई नौकरी पोस्ट करें।"
-        ),
-    },
-    "profile_labourer": {
-        "EN": (
-            "🪪 *My Profile*\n\n👤 Name: {name}\n🧾 Role: Labourer\n📍 Location: {location}\n"
-            "🛠️ Skill: {skill}\n⭐ Rating: {rating_str}\n✅ Total jobs completed: {total_done}\n"
-            "🌐 Language: {lang_label}\n{no_show_line}{penalty_line}\nReply VIEW JOBS to find more work."
-        ),
-        "TA": (
-            "🪪 *என் சுயவிவரம்*\n\n👤 பெயர்: {name}\n🧾 பாத்திரம்: தொழிலாளர்\n📍 இடம்: {location}\n"
-            "🛠️ திறன்: {skill}\n⭐ மதிப்பீடு: {rating_str}\n✅ மொத்தம் முடித்த வேலைகள்: {total_done}\n"
-            "🌐 மொழி: {lang_label}\n{no_show_line}{penalty_line}\nVIEW JOBS அனுப்பி மேலும் வேலைகளை தேடுங்கள்."
-        ),
-        "HI": (
-            "🪪 *मेरी प्रोफ़ाइल*\n\n👤 नाम: {name}\n🧾 भूमिका: मजदूर\n📍 स्थान: {location}\n"
-            "🛠️ कौशल: {skill}\n⭐ रेटिंग: {rating_str}\n✅ कुल पूर्ण नौकरियाँ: {total_done}\n"
-            "🌐 भाषा: {lang_label}\n{no_show_line}{penalty_line}\nVIEW JOBS भेजकर और नौकरियाँ खोजें।"
-        ),
-    },
-    "profile_rating_str": {
-        "EN": "{rating}⭐ ({count} rating{s})",
-        "TA": "{rating}⭐ ({count} மதிப்பீடு{s})",
-        "HI": "{rating}⭐ ({count} रेटिंग{s})",
-    },
-    "profile_no_rating":      {"EN": "No ratings yet",                         "TA": "இன்னும் மதிப்பீடு இல்லை",                               "HI": "अभी कोई रेटिंग नहीं"},
-    "profile_skill_not_set":  {"EN": "Not set — reply UPDATE SKILL to set it", "TA": "அமைக்கவில்லை — UPDATE SKILL அனுப்பி அமைக்கவும்",        "HI": "सेट नहीं — UPDATE SKILL भेजकर सेट करें"},
-    "profile_penalty_line":   {"EN": "⚠️ Penalty owed: ₹{amount}\n",          "TA": "⚠️ அபராதம் நிலுவை: ₹{amount}\n",                         "HI": "⚠️ जुर्माना बाकी: ₹{amount}\n"},
-    "profile_no_show_line":   {"EN": "⚠️ No-shows reported: {count}\n",       "TA": "⚠️ வரவில்லை என்று புகார்: {count}\n",                    "HI": "⚠️ नो-शो रिपोर्ट: {count}\n"},
-    "subsidies_header":       {"EN": "🏛️ *Active Government Schemes:*\n\n",   "TA": "🏛️ *செயல்பாட்டில் உள்ள அரசு திட்டங்கள்:*\n\n",         "HI": "🏛️ *सक्रिय सरकारी योजनाएँ:*\n\n"},
-    "subsidies_none":         {"EN": "No schemes are currently open for application.\n\n", "TA": "தற்போது விண்ணப்பிக்க திட்டங்கள் இல்லை.\n\n", "HI": "अभी कोई योजना आवेदन के लिए खुली नहीं है।\n\n"},
-    "subsidies_expired_header": {"EN": "─────────────────────\n❌ *Recently Expired:*\n\n", "TA": "─────────────────────\n❌ *சமீபத்தில் காலாவதியானது:*\n\n", "HI": "─────────────────────\n❌ *हाल ही में समाप्त:*\n\n"},
-    "subsidies_footer": {
-        "EN": "\nReply SUBSIDY [number] for full details.\nExample: SUBSIDY 1",
-        "TA": "\nSUBSIDY [எண்] அனுப்பி முழு விவரம் பெறுங்கள்.\nஉதாரணம்: SUBSIDY 1",
-        "HI": "\nSUBSIDY [नंबर] भेजकर पूरी जानकारी पाएँ।\nउदाहरण: SUBSIDY 1",
-    },
-    "subsidies_no_schemes": {
-        "EN": "No government schemes are available right now. Check back later!",
-        "TA": "இப்போது அரசு திட்டங்கள் எதுவும் இல்லை. பின்னர் சரிபாருங்கள்!",
-        "HI": "अभी कोई सरकारी योजना उपलब्ध नहीं। बाद में जाँचें!",
-    },
-    "subsidy_expired_label": {"EN": "❌ Expired", "TA": "❌ காலாவதியானது", "HI": "❌ समाप्त"},
-    "subsidy_invalid_number": {
-        "EN": "❌ Invalid number. Reply SUBSIDIES to see the list (1–{count}).",
-        "TA": "❌ தவறான எண். பட்டியலை காண SUBSIDIES அனுப்பவும் (1–{count}).",
-        "HI": "❌ अमान्य नंबर। सूची देखने के लिए SUBSIDIES भेजें (1–{count})।",
-    },
-    "subsidy_detail_active": {
-        "EN": "🏛️ *{name}*\n{tag}\n{deadline_line}\n\n📋 *Eligibility:*\n{eligibility}\n\n💰 *Benefit:*\n{benefit}\n\n📝 *How to Apply:*\n{how_to_apply}\n\n🔗 *Apply:* {link}\n\nReply SUBSIDIES to see the full list.",
-        "TA": "🏛️ *{name}*\n{tag}\n{deadline_line}\n\n📋 *தகுதி:*\n{eligibility}\n\n💰 *பலன்:*\n{benefit}\n\n📝 *விண்ணப்பிக்கும் முறை:*\n{how_to_apply}\n\n🔗 *விண்ணப்பிக்கவும்:* {link}\n\nSUBSIDIES அனுப்பி முழு பட்டியல் பாருங்கள்.",
-        "HI": "🏛️ *{name}*\n{tag}\n{deadline_line}\n\n📋 *पात्रता:*\n{eligibility}\n\n💰 *लाभ:*\n{benefit}\n\n📝 *आवेदन कैसे करें:*\n{how_to_apply}\n\n🔗 *आवेदन करें:* {link}\n\nSUBSIDIES भेजकर पूरी सूची देखें।",
-    },
-    "subsidy_detail_expired": {
-        "EN": "🏛️ *{name}*\n❌ Expired (last cycle ended {end_date})\n\n{next_cycle}\n\n📋 *Eligibility:*\n{eligibility}\n\n💰 *Benefit:*\n{benefit}\n\n📝 *How to Apply:*\n{how_to_apply}\n\n🔗 *Apply:* {link}\n\nReply SUBSIDIES to see the full list.",
-        "TA": "🏛️ *{name}*\n❌ காலாவதியானது (கடைசி சுழற்சி {end_date} அன்று முடிந்தது)\n\n{next_cycle}\n\n📋 *தகுதி:*\n{eligibility}\n\n💰 *பலன்:*\n{benefit}\n\n📝 *விண்ணப்பிக்கும் முறை:*\n{how_to_apply}\n\n🔗 *விண்ணப்பிக்கவும்:* {link}\n\nSUBSIDIES அனுப்பி முழு பட்டியல் பாருங்கள்.",
-        "HI": "🏛️ *{name}*\n❌ समाप्त (पिछला चक्र {end_date} को समाप्त हुआ)\n\n{next_cycle}\n\n📋 *पात्रता:*\n{eligibility}\n\n💰 *लाभ:*\n{benefit}\n\n📝 *आवेदन कैसे करें:*\n{how_to_apply}\n\n🔗 *आवेदन करें:* {link}\n\nSUBSIDIES भेजकर पूरी सूची देखें।",
-    },
-    "next_cycle_estimate": {
-        "EN": "📆 Likely reopens around {est_start} (estimate based on last year's cycle — confirm exact dates on the official portal).",
-        "TA": "📆 கிட்டத்தட்ட {est_start} அளவில் மீண்டும் திறக்கும் (கடந்த ஆண்டு சுழற்சி அடிப்படையில் மதிப்பீடு — சரியான தேதிகளை அதிகாரிக்க வலைதளத்தில் சரிபாருங்கள்).",
-        "HI": "📆 लगभग {est_start} के आसपास दोबारा खुलेगी (पिछले साल के चक्र के आधार पर अनुमान — सटीक तारीखें आधिकारिक पोर्टल पर देखें)।",
-    },
-    "no_deadline": {
-        "EN": "🟢 No fixed deadline — apply anytime.",
-        "TA": "🟢 நிலையான கடைசி தேதி இல்லை — எப்போதும் விண்ணப்பிக்கலாம்.",
-        "HI": "🟢 कोई निश्चित अंतिम तारीख नहीं — कभी भी आवेदन करें।",
-    },
-    "rent_equipment_start": {
-        "EN": "🚜 *Let's list your equipment!*\n\nWhat equipment do you want to rent out?\n(e.g. Tractor, Rotavator, Sprayer, Thresher)",
-        "TA": "🚜 *உங்கள் உபகரணத்தை பட்டியலிடுவோம்!*\n\nஎந்த உபகரணத்தை வாடகைக்கு கொடுக்க விரும்புகிறீர்கள்?\n(உதா: Tractor, Rotavator, Sprayer, Thresher)",
-        "HI": "🚜 *अपना उपकरण सूचीबद्ध करते हैं!*\n\nकौन सा उपकरण किराए पर देना चाहते हैं?\n(जैसे: Tractor, Rotavator, Sprayer, Thresher)",
-    },
-    "ask_rent_per_day": {
-        "EN": "What is the rent per day for your {name}? (in ₹)",
-        "TA": "உங்கள் {name}-க்கு நாளொன்றுக்கு வாடகை என்ன? (₹ இல்)",
-        "HI": "आपके {name} का प्रति दिन किराया क्या है? (₹ में)",
-    },
-    "ask_rent_invalid": {
-        "EN": "Please enter a valid amount (e.g. 500). What is the rent per day?",
-        "TA": "சரியான தொகை உள்ளிடவும் (உதா: 500). நாளொன்றுக்கு வாடகை என்ன?",
-        "HI": "कृपया एक सही राशि दर्ज करें (जैसे 500)। प्रति दिन किराया क्या है?",
-    },
-    "ask_available_until": {
-        "EN": "Available until which date?\n(e.g. {example}, Tomorrow, or reply *ongoing* if no end date)",
-        "TA": "எந்த தேதி வரை கிடைக்கும்?\n(உதா: {example}, Tomorrow, அல்லது கடைசி தேதி இல்லையெனில் *ongoing* அனுப்பவும்)",
-        "HI": "कब तक उपलब्ध है?\n(जैसे: {example}, Tomorrow, या अगर कोई अंत तारीख नहीं तो *ongoing* भेजें)",
-    },
-    "equipment_listed": {
-        "EN": "✅ *Equipment Listed!*\n\n🚜 Equipment: {name}\n💰 Rent: ₹{rent}/day\n📍 Location: {location}\n📅 Available until: {until}\n\nFarmers and labourers nearby can now find your equipment! 🔔",
-        "TA": "✅ *உபகரணம் பட்டியலிடப்பட்டது!*\n\n🚜 உபகரணம்: {name}\n💰 வாடகை: ₹{rent}/நாள்\n📍 இடம்: {location}\n📅 வரை கிடைக்கும்: {until}\n\nஅருகிலுள்ள விவசாயிகள் மற்றும் தொழிலாளர்கள் இப்போது காணலாம்! 🔔",
-        "HI": "✅ *उपकरण सूचीबद्ध!*\n\n🚜 उपकरण: {name}\n💰 किराया: ₹{rent}/दिन\n📍 स्थान: {location}\n📅 उपलब्ध: {until}\n\nपास के किसान और मजदूर अब इसे देख सकते हैं! 🔔",
-    },
-    "equipment_list_error": {
-        "EN": "⚠️ Error listing your equipment. Please try again by sending RENT EQUIPMENT.",
-        "TA": "⚠️ உபகரணத்தை பட்டியலிட பிழை. RENT EQUIPMENT அனுப்பி மீண்டும் முயற்சிக்கவும்.",
-        "HI": "⚠️ उपकरण सूचीबद्ध करने में त्रुटि। RENT EQUIPMENT भेजकर पुनः प्रयास करें।",
-    },
-    "ongoing_label_short": {"EN": "Ongoing", "TA": "தொடர்கிறது", "HI": "जारी"},
-    "view_equipment_empty": {
-        "EN": "No equipment available for rent in {location} right now. 😔\nCheck back later!",
-        "TA": "{location}-ல் இப்போது வாடகைக்கு உபகரணம் இல்லை. 😔\nபின்னர் சரிபாருங்கள்!",
-        "HI": "{location} में अभी किराए पर कोई उपकरण नहीं। 😔\nबाद में जाँचें!",
-    },
-    "view_equipment_header": {
-        "EN": "🚜 *Equipment Available in {location}:*\n\n",
-        "TA": "🚜 *{location}-ல் வாடகைக்கு உபகரணங்கள்:*\n\n",
-        "HI": "🚜 *{location} में किराए पर उपकरण:*\n\n",
-    },
-    "view_equipment_item": {
-        "EN": "{i}. 🔧 {name}\n   💰 ₹{rent}/day\n   📅 Until: {until}\n   ➡️ Reply BOOK EQUIPMENT {eq_id} to book\n\n",
-        "TA": "{i}. 🔧 {name}\n   💰 ₹{rent}/நாள்\n   📅 வரை: {until}\n   ➡️ BOOK EQUIPMENT {eq_id} அனுப்பி பதிவு செய்யவும்\n\n",
-        "HI": "{i}. 🔧 {name}\n   💰 ₹{rent}/दिन\n   📅 तक: {until}\n   ➡️ BOOK EQUIPMENT {eq_id} भेजकर बुक करें\n\n",
-    },
-    "book_equipment_unavailable": {
-        "EN": "❌ Sorry, {name} is no longer available for rent.",
-        "TA": "❌ மன்னிக்கவும், {name} இப்போது வாடகைக்கு கிடைக்கவில்லை.",
-        "HI": "❌ माफ करें, {name} अब किराए पर उपलब्ध नहीं है।",
-    },
-    "book_own_equipment":   {"EN": "❌ You can't book your own equipment.",        "TA": "❌ உங்கள் சொந்த உபகரணத்தை நீங்களே பதிவு செய்ய முடியாது.", "HI": "❌ आप अपना खुद का उपकरण बुक नहीं कर सकते।"},
-    "book_equipment_error": {"EN": "❌ Could not complete booking. Please try again.", "TA": "❌ பதிவு முடியவில்லை. மீண்டும் முயற்சிக்கவும்.", "HI": "❌ बुकिंग पूरी नहीं हुई। कृपया पुनः प्रयास करें।"},
-    "book_equipment_success": {
-        "EN": "✅ *Equipment Booked!*\n\n🚜 Equipment: {name}\n💰 Rent: ₹{rent}/day\n📅 Available until: {until}\n\nThe owner has been notified. They will contact you shortly! 📞",
-        "TA": "✅ *உபகரணம் பதிவு செய்யப்பட்டது!*\n\n🚜 உபகரணம்: {name}\n💰 வாடகை: ₹{rent}/நாள்\n📅 வரை கிடைக்கும்: {until}\n\nசொந்தக்காரருக்கு தெரிவிக்கப்பட்டது. விரைவில் தொடர்பு கொள்வார்கள்! 📞",
-        "HI": "✅ *उपकरण बुक हुआ!*\n\n🚜 उपकरण: {name}\n💰 किराया: ₹{rent}/दिन\n📅 उपलब्ध: {until}\n\nमालिक को सूचित किया गया। वे जल्द संपर्क करेंगे! 📞",
-    },
-    "my_equipment_empty": {
-        "EN": "You haven't listed any equipment yet.\nReply RENT EQUIPMENT to add one.",
-        "TA": "நீங்கள் இன்னும் எந்த உபகரணமும் பட்டியலிடவில்லை.\nRENT EQUIPMENT அனுப்பி சேர்க்கவும்.",
-        "HI": "आपने अभी तक कोई उपकरण सूचीबद्ध नहीं किया।\nRENT EQUIPMENT भेजकर जोड़ें।",
-    },
-    "my_equipment_header":  {"EN": "🚜 *Your Equipment Listings:*\n\n", "TA": "🚜 *உங்கள் உபகரண பட்டியல்:*\n\n",      "HI": "🚜 *आपके उपकरण लिस्टिंग:*\n\n"},
-    "my_equipment_footer":  {"EN": "Reply CANCEL EQUIPMENT [id] to remove a listing.", "TA": "CANCEL EQUIPMENT [id] அனுப்பி பட்டியலை நீக்கவும்.", "HI": "CANCEL EQUIPMENT [id] भेजकर लिस्टिंग हटाएँ।"},
-    "equip_status_available": {"EN": "✅ Available",  "TA": "✅ கிடைக்கிறது",              "HI": "✅ उपलब्ध"},
-    "equip_status_booked":    {"EN": "🔒 Booked",     "TA": "🔒 பதிவு செய்யப்பட்டது",    "HI": "🔒 बुक"},
-    "cancel_equipment_not_yours": {"EN": "❌ You can only cancel your own equipment listings.", "TA": "❌ உங்கள் சொந்த உபகரண பட்டியல்களை மட்டுமே ரத்து செய்யலாம்.", "HI": "❌ आप केवल अपनी खुद की उपकरण लिस्टिंग रद्द कर सकते हैं।"},
-    "cancel_equipment_error":   {"EN": "❌ Could not cancel listing. Please try again.", "TA": "❌ பட்டியலை ரத்து செய்ய முடியவில்லை. மீண்டும் முயற்சிக்கவும்.", "HI": "❌ लिस्टिंग रद्द नहीं हो सकी। कृपया पुनः प्रयास करें।"},
-    "cancel_equipment_success": {
-        "EN": "✅ Equipment listing #{eq_id} ({name}) has been cancelled.",
-        "TA": "✅ உபகரண பட்டியல் #{eq_id} ({name}) ரத்து செய்யப்பட்டது.",
-        "HI": "✅ उपकरण लिस्टिंग #{eq_id} ({name}) रद्द कर दी गई।",
-    },
-    "rehire_not_farmer":         {"EN": "❌ Only farmers can use REHIRE.",                                    "TA": "❌ விவசாயிகள் மட்டுமே REHIRE பயன்படுத்தலாம்.",                      "HI": "❌ केवल किसान ही REHIRE का उपयोग कर सकते हैं।"},
-    "rehire_job_not_found":      {"EN": "❌ Job not found, or it's not one of your jobs.",                   "TA": "❌ வேலை கிடைக்கவில்லை, அல்லது உங்கள் வேலை இல்லை.",              "HI": "❌ नौकरी नहीं मिली, या यह आपकी नौकरी नहीं है।"},
-    "rehire_no_labourer":        {"EN": "❌ That job doesn't have a labourer on record to rehire.",          "TA": "❌ அந்த வேலையில் மீண்டும் அழைக்க தொழிலாளர் பதிவு இல்லை.",      "HI": "❌ उस नौकरी में दोबारा बुलाने के लिए कोई मजदूर दर्ज नहीं है।"},
-    "rehire_labourer_not_found": {"EN": "❌ Could not find that labourer's profile anymore.",                "TA": "❌ அந்த தொழிலாளரின் சுயவிவரம் கிடைக்கவில்லை.",                  "HI": "❌ उस मजदूर की प्रोफ़ाइल नहीं मिली।"},
-    "rehire_start": {
-        "EN": "🔁 *Rehire {labourer_name}*\n\nLet's set up the new job. You can change any detail, or reply *SAME* / *KEEP* at each step to reuse the last value.\n\n🔨 Work type (last time: *{work_type}*):",
-        "TA": "🔁 *{labourer_name}-ஐ மீண்டும் அழைக்கிறோம்*\n\nபுதிய வேலையை அமைப்போம். எந்த விவரத்தையும் மாற்றலாம், அல்லது முந்தைய மதிப்பை வைக்க *SAME* / *KEEP* அனுப்பவும்.\n\n🔨 வேலை வகை (கடந்த முறை: *{work_type}*):",
-        "HI": "🔁 *{labourer_name} को दोबारा बुलाना*\n\nनई नौकरी सेट करते हैं। कोई भी विवरण बदल सकते हैं, या पिछला मान रखने के लिए *SAME* / *KEEP* भेजें।\n\n🔨 काम का प्रकार (पिछली बार: *{work_type}*):",
-    },
-    "rehire_ask_num": {
-        "EN": "👥 Number of labourers (last time: *{count}*)\nReply a number, or SAME to keep it:",
-        "TA": "👥 தொழிலாளர்கள் எண்ணிக்கை (கடந்த முறை: *{count}*)\nஒரு எண் அல்லது SAME அனுப்பவும்:",
-        "HI": "👥 मजदूरों की संख्या (पिछली बार: *{count}*)\nएक नंबर या SAME भेजें:",
-    },
-    "rehire_num_invalid":  {"EN": "Please enter a number, or reply SAME to keep the last value.",                         "TA": "ஒரு எண் அல்லது SAME அனுப்பவும்.",            "HI": "एक नंबर या SAME भेजें।"},
-    "rehire_ask_wage": {
-        "EN": "💰 Wage per day (last time: *₹{wage}/day*)\nReply a new amount, or SAME to keep it:",
-        "TA": "💰 நாளொன்றுக்கு கூலி (கடந்த முறை: *₹{wage}/நாள்*)\nபுதிய தொகை அல்லது SAME அனுப்பவும்:",
-        "HI": "💰 प्रति दिन मजदूरी (पिछली बार: *₹{wage}/दिन*)\nनई राशि या SAME भेजें:",
-    },
-    "rehire_wage_invalid": {"EN": "Please enter a valid amount (e.g. 600), or reply SAME to keep the last value.", "TA": "சரியான தொகை (உதா: 600) அல்லது SAME அனுப்பவும்.", "HI": "सही राशि (जैसे 600) या SAME भेजें।"},
-    "rehire_ask_date": {
-        "EN": "📅 When do you need them? (e.g. {example}, Tomorrow)",
-        "TA": "📅 எந்த தேதியில் தேவை? (உதா: {example}, Tomorrow)",
-        "HI": "📅 कब चाहिए? (जैसे: {example}, Tomorrow)",
-    },
-    "rehire_success": {
-        "EN": "✅ *Rehire invite sent to {labourer_name}!*\n\n🔨 Work: {work_type}\n👥 Labourers needed: {num_labourers}\n📅 Date: {start_date}\n💰 Wage: ₹{wage}/day\n\nThey'll need to reply CONFIRM {job_id} to accept, just like a normal job.",
-        "TA": "✅ *{labourer_name}-க்கு மீண்டும் அழைப்பு அனுப்பப்பட்டது!*\n\n🔨 வேலை: {work_type}\n👥 தேவையான தொழிலாளர்கள்: {num_labourers}\n📅 தேதி: {start_date}\n💰 கூலி: ₹{wage}/நாள்\n\nCONFIRM {job_id} அனுப்பி ஏற்றுக்கொள்ள வேண்டும்.",
-        "HI": "✅ *{labourer_name} को दोबारा बुलावा भेजा गया!*\n\n🔨 काम: {work_type}\n👥 मजदूर चाहिए: {num_labourers}\n📅 तारीख: {start_date}\n💰 मजदूरी: ₹{wage}/दिन\n\nCONFIRM {job_id} भेजकर स्वीकार करना होगा।",
-    },
-    "rehire_error": {
-        "EN": "⚠️ Error sending the rehire invite. Please try again with REHIRE [job_id].",
-        "TA": "⚠️ மீண்டும் அழைப்பு அனுப்ப பிழை. REHIRE [job_id] மூலம் மீண்டும் முயற்சிக்கவும்.",
-        "HI": "⚠️ दोबारा बुलावा भेजने में त्रुटि। REHIRE [job_id] से पुनः प्रयास करें।",
-    },
-    "voice_not_supported": {
-        "EN": "🎙️ We got your voice message!\n\nVoice commands aren't supported yet — that's coming in *Phase 3 (Voice AI)* of Farm Connect. 🚀\n\nFor now, please reply with text. Send HELP to see what you can do.",
-        "TA": "🎙️ உங்கள் குரல் செய்தி கிடைத்தது!\n\nகுரல் கட்டளைகள் இன்னும் ஆதரிக்கப்படவில்லை — அது *Phase 3 (Voice AI)*-ல் வரும். 🚀\n\nஇப்போது உரை மூலம் பதில் அனுப்பவும். HELP அனுப்பி என்ன செய்யலாம் என்று பாருங்கள்.",
-        "HI": "🎙️ आपका वॉइस मैसेज मिला!\n\nवॉइस कमांड अभी समर्थित नहीं — यह *Phase 3 (Voice AI)* में आएगा। 🚀\n\nअभी टेक्स्ट में जवाब दें। HELP भेजकर देखें क्या-क्या कर सकते हैं।",
-    },
-    "media_not_supported": {
-        "EN": "📎 We received your attachment, but Farm Connect only understands text messages right now.\n\nPlease describe what you need in words, or send HELP for the menu.",
-        "TA": "📎 உங்கள் இணைப்பு கிடைத்தது, ஆனால் Farm Connect இப்போது உரை செய்திகளை மட்டுமே புரிந்துகொள்கிறது.\n\nதேவையானதை வார்த்தைகளில் சொல்லுங்கள், அல்லது HELP அனுப்பவும்.",
-        "HI": "📎 आपका अटैचमेंट मिला, लेकिन Farm Connect अभी केवल टेक्स्ट संदेश समझता है।\n\nकृपया अपनी जरूरत शब्दों में बताएं, या HELP भेजें।",
-    },
-    "unknown_command": {
-        "EN": "❓ Unknown command. Did you mean *{suggestion}*?\n\n{hint}\n\nSend it exactly as shown to continue.",
-        "TA": "❓ தெரியாத கட்டளை. *{suggestion}* என்று சொல்ல விரும்பினீர்களா?\n\n{hint}\n\nதொடர அதை அப்படியே அனுப்பவும்.",
-        "HI": "❓ अज्ञात आदेश। क्या आपका मतलब *{suggestion}* था?\n\n{hint}\n\nजारी रखने के लिए इसे ठीक वैसे भेजें।",
-    },
-    "start_over": {
-        "EN": "Something went wrong. Let's start over.\n\nAre you a FARMER or LABOURER?\nReply FARMER or LABOURER to get started.",
-        "TA": "ஏதோ தவறு நடந்தது. மீண்டும் தொடங்குவோம்.\n\nநீங்கள் FARMER அல்லது LABOURER?\nFARMER அல்லது LABOURER என்று அனுப்பவும்.",
-        "HI": "कुछ गलत हो गया। दोबारा शुरू करते हैं।\n\nक्या आप FARMER हैं या LABOURER?\nFARMER या LABOURER भेजकर शुरू करें।",
-    },
-    "job_history_farmer_label": {
-        "EN": "👨‍🌾 {f_name} | ₹{wage}/day",
-        "TA": "👨‍🌾 {f_name} | ₹{wage}/நாள்",
-        "HI": "👨‍🌾 {f_name} | ₹{wage}/दिन",
-    },
-    "no_show_penalty_whatsapp": {
-        "EN": (
-            "⚠️ *No-Show Reported*\n\n"
-            "The farmer for Job #{job_id} ({work_type}) has reported that you did not show up.\n\n"
-            "📉 A ₹{amount} penalty has been added to your account and your rating has been reduced by {drop}⭐.\n\n"
-            "If you believe this was reported in error, please contact support.\n"
-            "Reply VIEW JOBS to find more work."
-        ),
-        "TA": (
-            "⚠️ *வரவில்லை என்று புகார்*\n\n"
-            "வேலை #{job_id} ({work_type})-க்கான விவசாயி நீங்கள் வரவில்லை என்று தெரிவித்துள்ளார்.\n\n"
-            "📉 ₹{amount} அபராதம் உங்கள் கணக்கில் சேர்க்கப்பட்டு மதிப்பீடு {drop}⭐ குறைக்கப்பட்டது.\n\n"
-            "இது தவறான புகார் என்றால் ஆதரவை தொடர்பு கொள்ளுங்கள்.\n"
-            "மேலும் வேலைகளுக்கு VIEW JOBS அனுப்பவும்."
-        ),
-        "HI": (
-            "⚠️ *नो-शो रिपोर्ट की गई*\n\n"
-            "नौकरी #{job_id} ({work_type}) के किसान ने बताया कि आप नहीं आए।\n\n"
-            "📉 ₹{amount} जुर्माना आपके खाते में जोड़ा गया और रेटिंग {drop}⭐ कम की गई।\n\n"
-            "अगर यह गलत है तो सहायता से संपर्क करें।\nVIEW JOBS भेजकर काम खोजें।"
-        ),
-    },
-    "cancel_labourer_whatsapp": {
-        "EN": (
-            "⚠️ *Job Cancelled*\n\n🔨 Work: {work_type}\n📍 Location: {location}\n📅 Date: {start_date}\n\n"
-            "This job has been cancelled by the farmer after you had already accepted it. "
-            "Sorry for the inconvenience — the farmer has been penalized for this cancellation."
-        ),
-        "TA": (
-            "⚠️ *வேலை ரத்து செய்யப்பட்டது*\n\n🔨 வேலை: {work_type}\n📍 இடம்: {location}\n📅 தேதி: {start_date}\n\n"
-            "நீங்கள் ஏற்றுக்கொண்ட பிறகு விவசாயி இந்த வேலையை ரத்து செய்தார். "
-            "தொந்தரவுக்கு மன்னிக்கவும் — விவசாயிக்கு அபராதம் விதிக்கப்பட்டது."
-        ),
-        "HI": (
-            "⚠️ *नौकरी रद्द हुई*\n\n🔨 काम: {work_type}\n📍 स्थान: {location}\n📅 तारीख: {start_date}\n\n"
-            "आपके स्वीकार करने के बाद किसान ने यह नौकरी रद्द कर दी। "
-            "असुविधा के लिए खेद है — किसान को जुर्माना लगाया गया।"
-        ),
-    },
-    "job_done_labourer_whatsapp": {
-        "EN": (
-            "✅ *Job Marked as Completed!*\n\n🔨 Work: {work_type}\n📍 Location: {location}\n📅 Date: {start_date}\n\n"
-            "The farmer has confirmed this job is done. 🎉\n\n"
-            "Please rate the farmer:\nReply RATE {job_id} [1-5]\nExample: RATE {job_id} 5"
-        ),
-        "TA": (
-            "✅ *வேலை முடிந்ததாக குறிக்கப்பட்டது!*\n\n🔨 வேலை: {work_type}\n📍 இடம்: {location}\n📅 தேதி: {start_date}\n\n"
-            "விவசாயி இந்த வேலை முடிந்தது என்று உறுதிப்படுத்தினார். 🎉\n\n"
-            "விவசாயியை மதிப்பிடவும்:\nRATE {job_id} [1-5] அனுப்பவும்\nஉதாரணம்: RATE {job_id} 5"
-        ),
-        "HI": (
-            "✅ *नौकरी पूर्ण मार्क की गई!*\n\n🔨 काम: {work_type}\n📍 स्थान: {location}\n📅 तारीख: {start_date}\n\n"
-            "किसान ने पुष्टि की कि यह काम पूरा हो गया। 🎉\n\n"
-            "किसान को रेट करें:\nRATE {job_id} [1-5] भेजें\nउदाहरण: RATE {job_id} 5"
-        ),
-    },
-    "confirm_farmer_whatsapp": {
-        "EN": (
-            "✅ *Job Confirmed!*\n\n👤 Labourer: {labourer_name}\n🛠️ Skill: {skill}\n"
-            "🔨 Work: {work_type}\n📍 Location: {location}\n📅 Date: {start_date}\n\n"
-            "Your labourer will arrive on the job date. 🌾\n"
-            "Once the work is finished, reply JOB DONE {job_id} to close it out and unlock ratings."
-        ),
-        "TA": (
-            "✅ *வேலை உறுதிப்படுத்தப்பட்டது!*\n\n👤 தொழிலாளர்: {labourer_name}\n🛠️ திறன்: {skill}\n"
-            "🔨 வேலை: {work_type}\n📍 இடம்: {location}\n📅 தேதி: {start_date}\n\n"
-            "தொழிலாளர் வேலை தேதியில் வருவார். 🌾\n"
-            "வேலை முடிந்தால் JOB DONE {job_id} அனுப்பி மூடவும்."
-        ),
-        "HI": (
-            "✅ *नौकरी पक्की हुई!*\n\n👤 मजदूर: {labourer_name}\n🛠️ कौशल: {skill}\n"
-            "🔨 काम: {work_type}\n📍 स्थान: {location}\n📅 तारीख: {start_date}\n\n"
-            "मजदूर नौकरी की तारीख पर पहुँचेंगे। 🌾\n"
-            "काम पूरा होने पर JOB DONE {job_id} भेजें।"
-        ),
-    },
-    "rehire_labourer_whatsapp": {
-        "EN": (
-            "🔁 *{farmer_name} wants to rehire you!*\n\n🔨 Work: {work_type}\n📍 Location: {location}\n"
-            "👥 Labourers needed: {num_labourers}\n💰 Wage: ₹{wage}/day\n📅 Date: {start_date}\n\n"
-            "Reply CONFIRM {job_id} to accept this job."
-        ),
-        "TA": (
-            "🔁 *{farmer_name} உங்களை மீண்டும் அழைக்கிறார்!*\n\n🔨 வேலை: {work_type}\n📍 இடம்: {location}\n"
-            "👥 தேவையான தொழிலாளர்கள்: {num_labourers}\n💰 கூலி: ₹{wage}/நாள்\n📅 தேதி: {start_date}\n\n"
-            "CONFIRM {job_id} அனுப்பி ஏற்றுக்கொள்ளவும்."
-        ),
-        "HI": (
-            "🔁 *{farmer_name} आपको दोबारा बुला रहे हैं!*\n\n🔨 काम: {work_type}\n📍 स्थान: {location}\n"
-            "👥 मजदूर चाहिए: {num_labourers}\n💰 मजदूरी: ₹{wage}/दिन\n📅 तारीख: {start_date}\n\n"
-            "CONFIRM {job_id} भेजकर स्वीकार करें।"
-        ),
-    },
-    "new_job_notification": {
-        "EN": (
-            "🔔 *New Job Near You!*\n\n🔨 Work: {work_type}\n📍 Location: {location}\n"
-            "👥 Labourers needed: {num_labourers}\n💰 Wage: ₹{wage}/day\n📅 Date: {start_date}\n\n"
-            "Reply CONFIRM {job_id} to accept this job."
-        ),
-        "TA": (
-            "🔔 *அருகில் புதிய வேலை!*\n\n🔨 வேலை: {work_type}\n📍 இடம்: {location}\n"
-            "👥 தேவையான தொழிலாளர்கள்: {num_labourers}\n💰 கூலி: ₹{wage}/நாள்\n📅 தேதி: {start_date}\n\n"
-            "CONFIRM {job_id} அனுப்பி ஏற்றுக்கொள்ளவும்."
-        ),
-        "HI": (
-            "🔔 *पास में नई नौकरी!*\n\n🔨 काम: {work_type}\n📍 स्थान: {location}\n"
-            "👥 मजदूर चाहिए: {num_labourers}\n💰 मजदूरी: ₹{wage}/दिन\n📅 तारीख: {start_date}\n\n"
-            "CONFIRM {job_id} भेजकर स्वीकार करें।"
-        ),
-    },
-    "new_equipment_notification": {
-        "EN": (
-            "🚜 Equipment Available for Rent Near You in {location}!\n\n"
-            "🔧 Equipment: {name}\n💰 Rent: ₹{rent}/day\n📅 Available until: {until}\n\n"
-            "Reply VIEW EQUIPMENT to see all listings."
-        ),
-        "TA": (
-            "🚜 {location}-ல் உங்களுக்கு அருகில் வாடகைக்கு உபகரணம்!\n\n"
-            "🔧 உபகரணம்: {name}\n💰 வாடகை: ₹{rent}/நாள்\n📅 வரை கிடைக்கும்: {until}\n\n"
-            "VIEW EQUIPMENT அனுப்பி அனைத்தையும் பாருங்கள்."
-        ),
-        "HI": (
-            "🚜 {location} में आपके पास किराए पर उपकरण!\n\n"
-            "🔧 उपकरण: {name}\n💰 किराया: ₹{rent}/दिन\n📅 उपलब्ध: {until}\n\n"
-            "VIEW EQUIPMENT भेजकर सभी लिस्टिंग देखें।"
-        ),
-    },
-    "equip_booking_owner_whatsapp": {
-        "EN": (
-            "🔔 *Equipment Booking Confirmed!*\n\n🚜 Equipment: {name}\n👤 Booked by: {user_name}\n"
-            "📞 Contact: {phone}\n💰 Rent: ₹{rent}/day\n\nPlease coordinate with them for pickup/delivery."
-        ),
-        "TA": (
-            "🔔 *உபகரண பதிவு உறுதிப்படுத்தப்பட்டது!*\n\n🚜 உபகரணம்: {name}\n👤 பதிவு செய்தவர்: {user_name}\n"
-            "📞 தொடர்பு: {phone}\n💰 வாடகை: ₹{rent}/நாள்\n\nபிக்அப்/டெலிவரிக்கு அவர்களை தொடர்புகொள்ளவும்."
-        ),
-        "HI": (
-            "🔔 *उपकरण बुकिंग पक्की!*\n\n🚜 उपकरण: {name}\n👤 बुक करने वाले: {user_name}\n"
-            "📞 संपर्क: {phone}\n💰 किराया: ₹{rent}/दिन\n\nपिकअप/डिलीवरी के लिए उनसे संपर्क करें।"
-        ),
-    },
-    "equip_cancel_booker_whatsapp": {
-        "EN": "⚠️ *Equipment Booking Cancelled*\n\n🚜 Equipment: {name}\n📍 Location: {location}\n\nThe owner has cancelled this listing. Sorry for the inconvenience.",
-        "TA": "⚠️ *உபகரண பதிவு ரத்து செய்யப்பட்டது*\n\n🚜 உபகரணம்: {name}\n📍 இடம்: {location}\n\nசொந்தக்காரர் இந்த பட்டியலை ரத்து செய்தார். தொந்தரவுக்கு மன்னிக்கவும்.",
-        "HI": "⚠️ *उपकरण बुकिंग रद्द हुई*\n\n🚜 उपकरण: {name}\n📍 स्थान: {location}\n\nमालिक ने यह लिस्टिंग रद्द कर दी। असुविधा के लिए खेद है।",
-    },
 }
 
-
 def t(key: str, phone: str, **kwargs) -> str:
-    """Look up a translation key for the user's language, with EN fallback."""
+    """Look up a translation key for the user's language, with EN fallback.
+    Supports .format()-style kwargs for interpolation."""
     lang = get_lang(phone)
     translations = T.get(key, {})
     text = translations.get(lang) or translations.get("EN", f"[{key}]")
     return text.format(**kwargs) if kwargs else text
+
+
 # ── Greeting keywords ─────────────────────────────────────────────────────────
 GREETINGS = {
     "HI", "HELLO", "HEY", "HELP", "START", "MENU",
@@ -940,7 +203,7 @@ GREETINGS = {
     "GM", "SUP", "YO", "HOWDY"
 }
 
-# ── Skill map ─────────────────────────────────────────────────────────────────
+# ── Skill map (shared by signup + UPDATE SKILL) ───────────────────────────────
 SKILL_MAP = {
     "1": "Harvesting", "HARVESTING": "Harvesting",
     "2": "Planting", "PLANTING": "Planting",
@@ -954,29 +217,46 @@ SKILL_MAP = {
     "NO PREFERENCE": "Any Work (No Preference)",
 }
 
-SKILL_PROMPT_EN = (
+SKILL_PROMPT = (
     "What is your main skill?\n\n"
-    "1️⃣  Harvesting\n2️⃣  Planting\n3️⃣  Irrigation\n4️⃣  Weeding\n"
-    "5️⃣  General Labour\n6️⃣  Any Work (No Preference)\n\nReply with the number or skill name."
+    "1️⃣  Harvesting\n"
+    "2️⃣  Planting\n"
+    "3️⃣  Irrigation\n"
+    "4️⃣  Weeding\n"
+    "5️⃣  General Labour\n"
+    "6️⃣  Any Work (No Preference)\n\n"
+    "Reply with the number or skill name."
 )
+
 SKILL_PROMPT_TA = (
     "உங்கள் முக்கிய திறன் என்ன?\n\n"
-    "1️⃣  அறுவடை (Harvesting)\n2️⃣  நடவு (Planting)\n3️⃣  நீர்ப்பாசனம் (Irrigation)\n"
-    "4️⃣  களை எடுத்தல் (Weeding)\n5️⃣  பொது உழைப்பு (General Labour)\n"
-    "6️⃣  எந்த வேலையும் (Any Work)\n\nஎண் அல்லது திறன் பெயர் அனுப்பவும்."
+    "1️⃣  அறுவடை (Harvesting)\n"
+    "2️⃣  நடவு (Planting)\n"
+    "3️⃣  நீர்ப்பாசனம் (Irrigation)\n"
+    "4️⃣  களை எடுத்தல் (Weeding)\n"
+    "5️⃣  பொது உழைப்பு (General Labour)\n"
+    "6️⃣  எந்த வேலையும் (Any Work)\n\n"
+    "எண் அல்லது திறன் பெயர் அனுப்பவும்."
 )
+
 SKILL_PROMPT_HI = (
     "आपका मुख्य कौशल क्या है?\n\n"
-    "1️⃣  कटाई (Harvesting)\n2️⃣  रोपाई (Planting)\n3️⃣  सिंचाई (Irrigation)\n"
-    "4️⃣  निराई (Weeding)\n5️⃣  सामान्य मजदूरी (General Labour)\n"
-    "6️⃣  कोई भी काम (Any Work)\n\nनंबर या कौशल का नाम टाइप करें।"
+    "1️⃣  कटाई (Harvesting)\n"
+    "2️⃣  रोपाई (Planting)\n"
+    "3️⃣  सिंचाई (Irrigation)\n"
+    "4️⃣  निराई (Weeding)\n"
+    "5️⃣  सामान्य मजदूरी (General Labour)\n"
+    "6️⃣  कोई भी काम (Any Work)\n\n"
+    "नंबर या कौशल का नाम टाइप करें।"
 )
 
 def skill_prompt_for(phone: str) -> str:
     lang = get_lang(phone)
-    if lang == "TA": return SKILL_PROMPT_TA
-    if lang == "HI": return SKILL_PROMPT_HI
-    return SKILL_PROMPT_EN
+    if lang == "TA":
+        return SKILL_PROMPT_TA
+    if lang == "HI":
+        return SKILL_PROMPT_HI
+    return SKILL_PROMPT
 
 # ── Fuzzy near-miss helper ────────────────────────────────────────────────────
 def _edit_distance(a, b):
@@ -1056,17 +336,20 @@ DATE_FORMATS = [
 ]
 
 def parse_relative_date(text):
-    t_low = text.strip().lower()
+    t = text.strip().lower()
     today = date.today()
-    if t_low == "today":    return today
-    if t_low == "tomorrow": return today.fromordinal(today.toordinal() + 1)
-    if t_low == "next week":return today.fromordinal(today.toordinal() + 7)
+    if t == "today":
+        return today
+    if t == "tomorrow":
+        return today.fromordinal(today.toordinal() + 1)
+    if t == "next week":
+        return today.fromordinal(today.toordinal() + 7)
     return None
 
 def parse_job_date(raw_text):
-    text  = raw_text.strip()
+    text = raw_text.strip()
     today = date.today()
-    rel   = parse_relative_date(text)
+    rel = parse_relative_date(text)
     if rel:
         return rel, None
     for fmt in DATE_FORMATS:
@@ -1092,9 +375,10 @@ def parse_job_date(raw_text):
     else:
         day_str, month_name, year_str = m.group(1), m.group(2), m.group(3)
     if month_name:
-        month_num = MONTHS.get(month_name.lower())
+        month_key = month_name.lower()
+        month_num = MONTHS.get(month_key)
         if month_num and day_str.isdigit():
-            day_num  = int(day_str)
+            day_num = int(day_str)
             year_num = int(year_str) if year_str else today.year
             try:
                 candidate = date(year_num, month_num, day_num)
@@ -1106,7 +390,7 @@ def parse_job_date(raw_text):
     return None, f"❓ Couldn't understand that date.\n\nPlease reply with a date like '{example_future_date_str()}', '{example_future_date_str(fmt='%d/%m/%Y')}', or 'Tomorrow'."
 
 def example_future_date_str(days_ahead: int = 5, fmt: str = "%d %B %Y") -> str:
-    today  = date.today()
+    today = date.today()
     future = today.fromordinal(today.toordinal() + days_ahead)
     return future.strftime(fmt)
 
@@ -1126,10 +410,14 @@ def validate_future_date(raw_text):
 # ── Days-until helper for subsidy deadlines ───────────────────────────────────
 def days_until(d: date) -> str:
     delta = (d - date.today()).days
-    if delta < 0:   return "expired"
-    if delta == 0:  return "⚠️ Last day today!"
-    if delta <= 7:  return f"⚠️ Only {delta} day{'s' if delta != 1 else ''} left!"
-    if delta <= 30: return f"🔔 {delta} days left"
+    if delta < 0:
+        return "expired"
+    if delta == 0:
+        return "⚠️ Last day today!"
+    if delta <= 7:
+        return f"⚠️ Only {delta} day{'s' if delta != 1 else ''} left!"
+    if delta <= 30:
+        return f"🔔 {delta} days left"
     return f"📅 Deadline: {d.strftime('%d %b %Y')}"
 
 # ── Government subsidy schemes ────────────────────────────────────────────────
@@ -1272,7 +560,8 @@ def schemes_deadline_within(days: int, today: date = None) -> list:
     today = today or date.today()
     result = []
     for s in active_schemes(today):
-        if s["end_date"] is None: continue
+        if s["end_date"] is None:
+            continue
         delta = (s["end_date"] - today).days
         if 0 <= delta <= days:
             result.append(s)
@@ -1280,20 +569,27 @@ def schemes_deadline_within(days: int, today: date = None) -> list:
 
 def active_schemes(today: date = None) -> list:
     today = today or date.today()
-    return [s for s in SUBSIDY_SCHEMES
-            if s["start_date"] <= today and (s["end_date"] is None or s["end_date"] >= today)]
+    return [
+        s for s in SUBSIDY_SCHEMES
+        if s["start_date"] <= today
+        and (s["end_date"] is None or s["end_date"] >= today)
+    ]
 
 def expired_schemes(today: date = None) -> list:
     today = today or date.today()
-    return [s for s in SUBSIDY_SCHEMES
-            if s["end_date"] is not None and s["end_date"] < today]
+    return [
+        s for s in SUBSIDY_SCHEMES
+        if s["end_date"] is not None and s["end_date"] < today
+    ]
 
 def expiry_tag(scheme: dict) -> str:
-    if scheme["end_date"] is None: return "🟢 Ongoing"
+    if scheme["end_date"] is None:
+        return "🟢 Ongoing"
     return days_until(scheme["end_date"])
 
 def next_cycle_estimate(scheme: dict) -> str:
     est_start = scheme["start_date"].replace(year=scheme["start_date"].year + 1)
+    est_end   = scheme["end_date"].replace(year=scheme["end_date"].year + 1)
     return (
         f"📆 Likely reopens around {est_start.strftime('%b %Y')} "
         f"(estimate based on last year's cycle — confirm exact dates on the official portal)."
@@ -1301,31 +597,55 @@ def next_cycle_estimate(scheme: dict) -> str:
 
 def renewal_or_deadline_line(scheme: dict) -> str:
     if scheme["end_date"] is None:
-        if scheme.get("renewal_note"): return scheme["renewal_note"]
+        if scheme.get("renewal_note"):
+            return scheme["renewal_note"]
         return "🟢 No fixed deadline — apply anytime."
     return f"📅 Deadline: {scheme['end_date'].strftime('%d %B %Y')}"
 
 # ── Nearby-areas lookup ───────────────────────────────────────────────────────
 NEARBY_AREAS = {
-    "TIRUCHENGODE": ["Tiruchengode", "Elacipalayam", "Sankari", "Mallasamudram",
-                     "Pallipalayam", "Komarapalayam", "Sankaridurg", "Erode",
-                     "Karumanur", "Mallasamudram West", "Vennandur"],
-    "SANKARI":        ["Sankari", "Tiruchengode", "Mallasamudram", "Erode", "Komarapalayam"],
-    "ELACIPALAYAM":   ["Elacipalayam", "Tiruchengode", "Sankari"],
-    "MALLASAMUDRAM":  ["Mallasamudram", "Mallasamudram West", "Tiruchengode", "Sankari", "Karumanur"],
-    "KOMARAPALAYAM":  ["Komarapalayam", "Pallipalayam", "Tiruchengode", "Sankari"],
-    "PALLIPALAYAM":   ["Pallipalayam", "Komarapalayam", "Tiruchengode"],
-    "ERODE":          ["Erode", "Tiruchengode", "Sankari", "Perundurai"],
-    "NAMAKKAL":       ["Namakkal", "Tiruchengode", "Rasipuram", "Paramathi Velur"],
-    "RASIPURAM":      ["Rasipuram", "Namakkal", "Tiruchengode"],
-    "DINDIGUL":       ["Dindigul", "Palani", "Oddanchatram", "Natham", "Vedasandur",
-                       "Nilakottai", "Kodaikanal"],
-    "PALANI":         ["Palani", "Dindigul", "Oddanchatram"],
+    "TIRUCHENGODE": [
+        "Tiruchengode", "Elacipalayam", "Sankari", "Mallasamudram",
+        "Pallipalayam", "Komarapalayam", "Sankaridurg", "Erode",
+        "Karumanur", "Mallasamudram West", "Vennandur",
+    ],
+    "SANKARI": [
+        "Sankari", "Tiruchengode", "Mallasamudram", "Erode", "Komarapalayam",
+    ],
+    "ELACIPALAYAM": [
+        "Elacipalayam", "Tiruchengode", "Sankari",
+    ],
+    "MALLASAMUDRAM": [
+        "Mallasamudram", "Mallasamudram West", "Tiruchengode", "Sankari", "Karumanur",
+    ],
+    "KOMARAPALAYAM": [
+        "Komarapalayam", "Pallipalayam", "Tiruchengode", "Sankari",
+    ],
+    "PALLIPALAYAM": [
+        "Pallipalayam", "Komarapalayam", "Tiruchengode",
+    ],
+    "ERODE": [
+        "Erode", "Tiruchengode", "Sankari", "Perundurai",
+    ],
+    "NAMAKKAL": [
+        "Namakkal", "Tiruchengode", "Rasipuram", "Paramathi Velur",
+    ],
+    "RASIPURAM": [
+        "Rasipuram", "Namakkal", "Tiruchengode",
+    ],
+    "DINDIGUL": [
+        "Dindigul", "Palani", "Oddanchatram", "Natham", "Vedasandur",
+        "Nilakottai", "Kodaikanal",
+    ],
+    "PALANI": [
+        "Palani", "Dindigul", "Oddanchatram",
+    ],
 }
 
 def expand_nearby_locations(location: str) -> list:
     key = (location or "").strip().upper()
-    if key in NEARBY_AREAS: return NEARBY_AREAS[key]
+    if key in NEARBY_AREAS:
+        return NEARBY_AREAS[key]
     for cluster_key, places in NEARBY_AREAS.items():
         if key in [p.upper() for p in places]:
             return places
@@ -1354,10 +674,12 @@ LOCATION_COORDS = {
 def get_rain_risk(location: str, target_date: date):
     key = (location or "").strip().upper()
     coords = LOCATION_COORDS.get(key)
-    if not coords: return None
+    if not coords:
+        return None
     lat, lon = coords
     days_ahead = (target_date - date.today()).days
-    if days_ahead < 0 or days_ahead > 15: return None
+    if days_ahead < 0 or days_ahead > 15:
+        return None
     try:
         url = (
             "https://api.open-meteo.com/v1/forecast"
@@ -1368,17 +690,22 @@ def get_rain_risk(location: str, target_date: date):
         )
         res = req.get(url, timeout=8)
         res.raise_for_status()
-        data   = res.json()
-        dates  = data.get("daily", {}).get("time", [])
-        probs  = data.get("daily", {}).get("precipitation_probability_max", [])
+        data = res.json()
+        dates = data.get("daily", {}).get("time", [])
+        probs = data.get("daily", {}).get("precipitation_probability_max", [])
         target_str = target_date.strftime("%Y-%m-%d")
-        if target_str not in dates: return None
-        idx    = dates.index(target_str)
+        if target_str not in dates:
+            return None
+        idx = dates.index(target_str)
         chance = probs[idx]
-        if chance is None: return None
-        if chance >= 60:   label = f"⚠️ {chance}% chance of rain — you may want to plan around it."
-        elif chance >= 30: label = f"🌦️ {chance}% chance of rain."
-        else:              label = f"☀️ Low rain risk ({chance}%)."
+        if chance is None:
+            return None
+        if chance >= 60:
+            label = f"⚠️ {chance}% chance of rain — you may want to plan around it."
+        elif chance >= 30:
+            label = f"🌦️ {chance}% chance of rain."
+        else:
+            label = f"☀️ Low rain risk ({chance}%)."
         return chance, label
     except Exception as e:
         print(f"[WEATHER] get_rain_risk ERROR: {e}")
@@ -1441,7 +768,8 @@ def get_jobs_by_phone(phone):
 def get_open_jobs_by_location(location):
     try:
         or_filter = build_location_or_filter(location)
-        url = f"{SUPABASE_URL}/rest/v1/jobs?{or_filter}&status=eq.open&limit=5"
+        url = (f"{SUPABASE_URL}/rest/v1/jobs"
+               f"?{or_filter}&status=eq.open&limit=5")
         res = req.get(url, headers=HEADERS, timeout=10)
         res.raise_for_status()
         return res.json() if isinstance(res.json(), list) else []
@@ -1464,7 +792,8 @@ def get_confirmed_jobs_for_farmer(phone):
     try:
         encoded_phone = quote(phone, safe="")
         url = (f"{SUPABASE_URL}/rest/v1/jobs"
-               f"?farmer_phone=eq.{encoded_phone}&status=eq.confirmed&order=start_date.desc&limit=10")
+               f"?farmer_phone=eq.{encoded_phone}&status=eq.confirmed"
+               f"&order=start_date.desc&limit=10")
         res = req.get(url, headers=HEADERS, timeout=10)
         res.raise_for_status()
         return res.json() if isinstance(res.json(), list) else []
@@ -1476,7 +805,8 @@ def get_confirmed_jobs_for_labourer(phone):
     try:
         encoded_phone = quote(phone, safe="")
         url = (f"{SUPABASE_URL}/rest/v1/jobs"
-               f"?labourer_phone=eq.{encoded_phone}&status=eq.confirmed&order=start_date.desc&limit=10")
+               f"?labourer_phone=eq.{encoded_phone}&status=eq.confirmed"
+               f"&order=start_date.desc&limit=10")
         res = req.get(url, headers=HEADERS, timeout=10)
         res.raise_for_status()
         return res.json() if isinstance(res.json(), list) else []
@@ -1488,7 +818,8 @@ def get_completed_jobs_for_farmer(phone):
     try:
         encoded_phone = quote(phone, safe="")
         url = (f"{SUPABASE_URL}/rest/v1/jobs"
-               f"?farmer_phone=eq.{encoded_phone}&status=eq.completed&order=start_date.desc&limit=10")
+               f"?farmer_phone=eq.{encoded_phone}&status=eq.completed"
+               f"&order=start_date.desc&limit=10")
         res = req.get(url, headers=HEADERS, timeout=10)
         res.raise_for_status()
         return res.json() if isinstance(res.json(), list) else []
@@ -1500,7 +831,8 @@ def get_completed_jobs_for_labourer(phone):
     try:
         encoded_phone = quote(phone, safe="")
         url = (f"{SUPABASE_URL}/rest/v1/jobs"
-               f"?labourer_phone=eq.{encoded_phone}&status=eq.completed&order=start_date.desc&limit=10")
+               f"?labourer_phone=eq.{encoded_phone}&status=eq.completed"
+               f"&order=start_date.desc&limit=10")
         res = req.get(url, headers=HEADERS, timeout=10)
         res.raise_for_status()
         return res.json() if isinstance(res.json(), list) else []
@@ -1534,6 +866,32 @@ def count_jobs_posted_by_farmer(phone):
         print(f"[DB] count_jobs_posted_by_farmer ERROR: {e}")
         return 0
 
+PENALTY_AMOUNT = 200
+RATING_PENALTY = 0.5
+
+def apply_penalty(table: str, phone: str, reason: str):
+    record = get_from_db(table, phone)
+    if not record:
+        return []
+    current_balance = record.get("penalty_balance", 0) or 0
+    current_rating  = record.get("rating", 0) or 0
+    new_balance = current_balance + PENALTY_AMOUNT
+    new_rating  = max(0, round(current_rating - RATING_PENALTY, 1))
+    print(f"[PENALTY] {table}/{phone} | reason={reason} | "
+          f"balance {current_balance}->{new_balance} | rating {current_rating}->{new_rating}")
+    return update_db(table, {"phone": phone}, {
+        "penalty_balance": new_balance,
+        "rating": new_rating,
+    })
+
+def increment_no_show(labourer_phone):
+    labourer = get_from_db("labourers", labourer_phone)
+    if not labourer:
+        return []
+    current = labourer.get("no_show_count", 0) or 0
+    update_db("labourers", {"phone": labourer_phone}, {"no_show_count": current + 1})
+    return apply_penalty("labourers", labourer_phone, "no_show")
+
 def count_jobs_done_by_labourer(phone):
     try:
         encoded_phone = quote(phone, safe="")
@@ -1547,45 +905,27 @@ def count_jobs_done_by_labourer(phone):
         print(f"[DB] count_jobs_done_by_labourer ERROR: {e}")
         return 0
 
-PENALTY_AMOUNT = 200
-RATING_PENALTY = 0.5
-
-def apply_penalty(table: str, phone: str, reason: str):
-    record = get_from_db(table, phone)
-    if not record: return []
-    current_balance = record.get("penalty_balance", 0) or 0
-    current_rating  = record.get("rating", 0) or 0
-    new_balance = current_balance + PENALTY_AMOUNT
-    new_rating  = max(0, round(current_rating - RATING_PENALTY, 1))
-    print(f"[PENALTY] {table}/{phone} | reason={reason} | "
-          f"balance {current_balance}->{new_balance} | rating {current_rating}->{new_rating}")
-    return update_db(table, {"phone": phone}, {"penalty_balance": new_balance, "rating": new_rating})
-
-def increment_no_show(labourer_phone):
-    labourer = get_from_db("labourers", labourer_phone)
-    if not labourer: return []
-    current = labourer.get("no_show_count", 0) or 0
-    update_db("labourers", {"phone": labourer_phone}, {"no_show_count": current + 1})
-    return apply_penalty("labourers", labourer_phone, "no_show")
-
 def get_average_wage(work_type, location):
     try:
         words = [w for w in re.findall(r"[A-Za-z]+", work_type or "") if len(w) >= 3]
-        if not words: return None
-        key_word  = words[0]
+        if not words:
+            return None
+        key_word = words[0]
         or_filter = build_location_or_filter(location)
         url = (f"{SUPABASE_URL}/rest/v1/jobs"
                f"?{or_filter}&status=eq.completed"
                f"&work_type=ilike.{quote(f'%{key_word}%', safe='')}"
                f"&select=wage")
         print(f"[WAGE] GET {url}")
-        res  = req.get(url, headers=HEADERS, timeout=10)
+        res = req.get(url, headers=HEADERS, timeout=10)
         res.raise_for_status()
         rows = res.json()
         print(f"[WAGE] matched {len(rows) if isinstance(rows, list) else 0} completed job(s) for '{key_word}'")
-        if not isinstance(rows, list) or not rows: return None
+        if not isinstance(rows, list) or not rows:
+            return None
         wages = [float(r["wage"]) for r in rows if r.get("wage") not in (None, "")]
-        if not wages: return None
+        if not wages:
+            return None
         return round(sum(wages) / len(wages))
     except Exception as e:
         print(f"[DB] get_average_wage ERROR: {e}")
@@ -1594,9 +934,11 @@ def get_average_wage(work_type, location):
 def current_financial_year_bounds(today: date = None):
     today = today or date.today()
     if today.month >= 4:
-        start = date(today.year, 4, 1);     end = date(today.year + 1, 3, 31)
+        start = date(today.year, 4, 1)
+        end   = date(today.year + 1, 3, 31)
     else:
-        start = date(today.year - 1, 4, 1); end = date(today.year, 3, 31)
+        start = date(today.year - 1, 4, 1)
+        end   = date(today.year, 3, 31)
     return start, end
 
 def count_completed_days_in_range(phone, start: date, end: date):
@@ -1607,11 +949,13 @@ def count_completed_days_in_range(phone, start: date, end: date):
         res = req.get(url, headers=HEADERS, timeout=10)
         res.raise_for_status()
         rows = res.json()
-        if not isinstance(rows, list): return 0
+        if not isinstance(rows, list):
+            return 0
         count = 0
         for row in rows:
             raw = row.get("start_date")
-            if not raw: continue
+            if not raw:
+                continue
             try:
                 d = datetime.strptime(raw, "%d %B %Y").date()
             except ValueError:
@@ -1653,7 +997,8 @@ def get_equipment_by_id(equipment_id):
 def get_equipment_by_location(location):
     try:
         or_filter = build_location_or_filter(location)
-        url = f"{SUPABASE_URL}/rest/v1/equipment?{or_filter}&available=eq.true&limit=10"
+        url = (f"{SUPABASE_URL}/rest/v1/equipment"
+               f"?{or_filter}&available=eq.true&limit=10")
         res = req.get(url, headers=HEADERS, timeout=10)
         res.raise_for_status()
         return res.json() if isinstance(res.json(), list) else []
@@ -1672,8 +1017,8 @@ def send_whatsapp(to, message):
         print(f"[TWILIO] ERROR sending to {to}: {e}")
 
 def notify_nearby_users_about_equipment(equipment):
-    location  = equipment["location"]
-    farmers   = []
+    location = equipment["location"]
+    farmers  = []
     try:
         or_filter = build_location_or_filter(location)
         url = f"{SUPABASE_URL}/rest/v1/farmers?{or_filter}"
@@ -1687,14 +1032,13 @@ def notify_nearby_users_about_equipment(equipment):
     print(f"[NOTIFY] Notifying {len(all_users)} user(s) about equipment in {location}")
     for user in all_users:
         if user.get("phone") != equipment.get("owner_phone"):
-            lang = get_lang(user["phone"])
             send_whatsapp(
                 user["phone"],
-                t("new_equipment_notification", user["phone"],
-                  location=location,
-                  name=equipment["name"],
-                  rent=equipment["rent_per_day"],
-                  until=equipment.get("available_until") or t("ongoing_label_short", user["phone"]))
+                f"🚜 Equipment Available for Rent Near You in {location}!\n\n"
+                f"🔧 Equipment: {equipment['name']}\n"
+                f"💰 Rent: ₹{equipment['rent_per_day']}/day\n"
+                f"📅 Available until: {equipment.get('available_until') or 'Ongoing'}\n\n"
+                f"Reply VIEW EQUIPMENT to see all listings."
             )
 
 def notify_nearby_labourers(job):
@@ -1704,13 +1048,13 @@ def notify_nearby_labourers(job):
         if labourer.get("phone") != job.get("farmer_phone"):
             send_whatsapp(
                 labourer["phone"],
-                t("new_job_notification", labourer["phone"],
-                  work_type=job["work_type"],
-                  location=job["location"],
-                  num_labourers=job["num_labourers"],
-                  wage=job["wage"],
-                  start_date=job["start_date"],
-                  job_id=job["id"])
+                f"🔔 *New Job Near You!*\n\n"
+                f"🔨 Work: {job['work_type']}\n"
+                f"📍 Location: {job['location']}\n"
+                f"👥 Labourers needed: {job['num_labourers']}\n"
+                f"💰 Wage: ₹{job['wage']}/day\n"
+                f"📅 Date: {job['start_date']}\n\n"
+                f"Reply CONFIRM {job['id']} to accept this job."
             )
 
 def twiml_response(text):
@@ -1724,180 +1068,314 @@ def help_farmer(phone: str) -> str:
     lang = get_lang(phone)
     if lang == "TA":
         return (
-            "╔══════════════════════════╗\n║  🌾 விவசாயி உதவி         ║\n╚══════════════════════════╝\n\n"
-            "📅 *TODAY* — தினசரி சுருக்கம்\n📋 *POST JOB* — புதிய வேலை போடுங்கள்\n"
-            "📂 *MY JOBS* — உங்கள் வேலைகளை பாருங்கள்\n👥 *MY LABOURERS* — ஏற்றுக்கொண்ட / முடிந்த வேலைகள்\n"
-            "✅ *JOB DONE [id]* — வேலை முடிந்தது என்று குறிக்கவும்\n   உதாரணம்: JOB DONE 12\n"
-            "🔁 *REHIRE [id]* — முன்பு வேலை செய்தவரை மீண்டும் அழையுங்கள்\n   உதாரணம்: REHIRE 12\n"
-            "❌ *CANCEL [id]* — வேலையை ரத்து செய்யுங்கள்\n   உதாரணம்: CANCEL 7\n"
-            "⭐ *RATE [id] [1-5]* — தொழிலாளரை மதிப்பிடுங்கள்\n   உதாரணம்: RATE 12 5\n"
+            "╔══════════════════════════╗\n"
+            "║  🌾 விவசாயி உதவி         ║\n"
+            "╚══════════════════════════╝\n\n"
+            "📅 *TODAY* — தினசரி சுருக்கம்\n"
+            "📋 *POST JOB* — புதிய வேலை போடுங்கள்\n"
+            "📂 *MY JOBS* — உங்கள் வேலைகளை பாருங்கள்\n"
+            "👥 *MY LABOURERS* — ஏற்றுக்கொண்ட / முடிந்த வேலைகள்\n"
+            "✅ *JOB DONE [id]* — வேலை முடிந்தது என்று குறிக்கவும்\n"
+            "   உதாரணம்: JOB DONE 12\n"
+            "🔁 *REHIRE [id]* — முன்பு வேலை செய்தவரை மீண்டும் அழையுங்கள்\n"
+            "   உதாரணம்: REHIRE 12\n"
+            "❌ *CANCEL [id]* — வேலையை ரத்து செய்யுங்கள்\n"
+            "   உதாரணம்: CANCEL 7\n"
+            "⭐ *RATE [id] [1-5]* — தொழிலாளரை மதிப்பிடுங்கள்\n"
+            "   உதாரணம்: RATE 12 5\n"
             "⚠️ *NO SHOW [id]* — வராத தொழிலாளரை புகார் செய்யுங்கள்\n"
             "🚜 *RENT EQUIPMENT* — உபகரணங்களை வாடகைக்கு போடுங்கள்\n"
             "🔧 *MY EQUIPMENT* — உங்கள் உபகரண பட்டியல்\n"
-            "🏛️ *SUBSIDIES* — அரசு திட்டங்கள்\n🪪 *MY PROFILE* — உங்கள் சுயவிவரம்\n"
-            "🌐 *LANGUAGE* — மொழி மாற்றவும்\n\nHELP என்று அனுப்பினால் இந்த பட்டியல் எப்போதும் வரும்."
+            "🏛️ *SUBSIDIES* — அரசு திட்டங்கள்\n"
+            "🪪 *MY PROFILE* — உங்கள் சுயவிவரம்\n"
+            "🌐 *LANGUAGE* — மொழி மாற்றவும்\n\n"
+            "HELP என்று அனுப்பினால் இந்த பட்டியல் எப்போதும் வரும்."
         )
     if lang == "HI":
         return (
-            "╔══════════════════════════╗\n║  🌾 किसान सहायता          ║\n╚══════════════════════════╝\n\n"
-            "📅 *TODAY* — आज का सारांश\n📋 *POST JOB* — नई नौकरी पोस्ट करें\n"
-            "📂 *MY JOBS* — अपनी नौकरियाँ देखें\n👥 *MY LABOURERS* — स्वीकृत/पूर्ण नौकरियाँ\n"
-            "✅ *JOB DONE [id]* — काम पूरा होने पर मार्क करें\n   उदाहरण: JOB DONE 12\n"
-            "🔁 *REHIRE [id]* — पुराने मजदूर को दोबारा बुलाएँ\n   उदाहरण: REHIRE 12\n"
-            "❌ *CANCEL [id]* — नौकरी रद्द करें\n   उदाहरण: CANCEL 7\n"
-            "⭐ *RATE [id] [1-5]* — मजदूर को रेट करें\n   उदाहरण: RATE 12 5\n"
+            "╔══════════════════════════╗\n"
+            "║  🌾 किसान सहायता          ║\n"
+            "╚══════════════════════════╝\n\n"
+            "📅 *TODAY* — आज का सारांश\n"
+            "📋 *POST JOB* — नई नौकरी पोस्ट करें\n"
+            "📂 *MY JOBS* — अपनी नौकरियाँ देखें\n"
+            "👥 *MY LABOURERS* — स्वीकृत/पूर्ण नौकरियाँ\n"
+            "✅ *JOB DONE [id]* — काम पूरा होने पर मार्क करें\n"
+            "   उदाहरण: JOB DONE 12\n"
+            "🔁 *REHIRE [id]* — पुराने मजदूर को दोबारा बुलाएँ\n"
+            "   उदाहरण: REHIRE 12\n"
+            "❌ *CANCEL [id]* — नौकरी रद्द करें\n"
+            "   उदाहरण: CANCEL 7\n"
+            "⭐ *RATE [id] [1-5]* — मजदूर को रेट करें\n"
+            "   उदाहरण: RATE 12 5\n"
             "⚠️ *NO SHOW [id]* — नहीं आने की रिपोर्ट करें\n"
-            "🚜 *RENT EQUIPMENT* — उपकरण किराए पर दें\n🔧 *MY EQUIPMENT* — अपने उपकरण देखें\n"
-            "🏛️ *SUBSIDIES* — सरकारी योजनाएँ\n🪪 *MY PROFILE* — अपनी प्रोफ़ाइल देखें\n"
-            "🌐 *LANGUAGE* — भाषा बदलें\n\nHELP भेजने पर यह सूची कभी भी देख सकते हैं।"
+            "🚜 *RENT EQUIPMENT* — उपकरण किराए पर दें\n"
+            "🔧 *MY EQUIPMENT* — अपने उपकरण देखें\n"
+            "🏛️ *SUBSIDIES* — सरकारी योजनाएँ\n"
+            "🪪 *MY PROFILE* — अपनी प्रोफ़ाइल देखें\n"
+            "🌐 *LANGUAGE* — भाषा बदलें\n\n"
+            "HELP भेजने पर यह सूची कभी भी देख सकते हैं।"
         )
+    # Default EN
     return (
-        "╔══════════════════════════╗\n║  🌾 FARMER HELP           ║\n╚══════════════════════════╝\n\n"
-        "📅 *TODAY* — Your daily digest\n📋 *POST JOB* — Post a new job\n"
-        "📂 *MY JOBS* — View your posted jobs\n👥 *MY LABOURERS* — Accepted/completed jobs\n"
-        "✅ *JOB DONE [id]* — Mark a job complete\n   Example: JOB DONE 12\n"
-        "🔁 *REHIRE [id]* — Invite a past labourer again\n   Example: REHIRE 12\n"
-        "❌ *CANCEL [id]* — Cancel a job\n   Example: CANCEL 7\n"
-        "⭐ *RATE [id] [1-5]* — Rate a labourer after work\n   Example: RATE 12 5\n"
-        "⚠️ *NO SHOW [id]* — Report a labourer who didn't arrive\n   Example: NO SHOW 12\n"
+        "╔══════════════════════════╗\n"
+        "║  🌾 FARMER HELP           ║\n"
+        "╚══════════════════════════╝\n\n"
+        "📅 *TODAY* — Your daily digest\n"
+        "📋 *POST JOB* — Post a new job\n"
+        "📂 *MY JOBS* — View your posted jobs\n"
+        "👥 *MY LABOURERS* — Accepted/completed jobs\n"
+        "✅ *JOB DONE [id]* — Mark a job complete\n"
+        "   Example: JOB DONE 12\n"
+        "🔁 *REHIRE [id]* — Invite a past labourer again\n"
+        "   Example: REHIRE 12\n"
+        "❌ *CANCEL [id]* — Cancel a job\n"
+        "   Example: CANCEL 7\n"
+        "⭐ *RATE [id] [1-5]* — Rate a labourer after work\n"
+        "   Example: RATE 12 5\n"
+        "⚠️ *NO SHOW [id]* — Report a labourer who didn't arrive\n"
+        "   Example: NO SHOW 12\n"
         "🚜 *RENT EQUIPMENT* — List your equipment for rent\n"
         "🔧 *MY EQUIPMENT* — View your equipment listings\n"
-        "🏛️ *SUBSIDIES* — Browse government schemes\n   Example: SUBSIDY 1\n"
+        "🏛️ *SUBSIDIES* — Browse government schemes\n"
+        "   Example: SUBSIDY 1\n"
         "🪪 *MY PROFILE* — View your profile & rating\n"
-        "🌐 *LANGUAGE* — Change language (Tamil/Hindi/English)\n\nSend HELP anytime to see this list."
+        "🌐 *LANGUAGE* — Change language (Tamil/Hindi/English)\n\n"
+        "Send HELP anytime to see this list."
     )
 
 def help_labourer(phone: str) -> str:
     lang = get_lang(phone)
     if lang == "TA":
         return (
-            "╔══════════════════════════╗\n║  👷 தொழிலாளர் உதவி       ║\n╚══════════════════════════╝\n\n"
-            "📅 *TODAY* — தினசரி சுருக்கம்\n🔍 *VIEW JOBS* — அருகிலுள்ள வேலைகளை பாருங்கள்\n"
-            "✅ *CONFIRM [id]* — வேலையை ஏற்றுக்கொள்ளுங்கள்\n   உதாரணம்: CONFIRM 3\n"
+            "╔══════════════════════════╗\n"
+            "║  👷 தொழிலாளர் உதவி       ║\n"
+            "╚══════════════════════════╝\n\n"
+            "📅 *TODAY* — தினசரி சுருக்கம்\n"
+            "🔍 *VIEW JOBS* — அருகிலுள்ள வேலைகளை பாருங்கள்\n"
+            "✅ *CONFIRM [id]* — வேலையை ஏற்றுக்கொள்ளுங்கள்\n"
+            "   உதாரணம்: CONFIRM 3\n"
             "👨‍🌾 *MY FARMERS* — ஏற்றுக்கொண்ட / முடிந்த வேலைகள்\n"
-            "📜 *JOB HISTORY* — கடந்த வேலைகளின் வரலாறு\n📊 *MY DAYS* — MGNREGA நாள் கணக்கு\n"
-            "⭐ *RATE [id] [1-5]* — விவசாயியை மதிப்பிடுங்கள்\n   உதாரணம்: RATE 12 4\n"
+            "📜 *JOB HISTORY* — கடந்த வேலைகளின் வரலாறு\n"
+            "📊 *MY DAYS* — MGNREGA நாள் கணக்கு\n"
+            "⭐ *RATE [id] [1-5]* — விவசாயியை மதிப்பிடுங்கள்\n"
+            "   உதாரணம்: RATE 12 4\n"
             "🚜 *VIEW EQUIPMENT* — வாடகை உபகரணங்களை பாருங்கள்\n"
             "🔖 *BOOK EQUIPMENT [id]* — உபகரணம் பதிவு செய்யுங்கள்\n"
-            "🏛️ *SUBSIDIES* — அரசு திட்டங்கள்\n🛠️ *UPDATE SKILL* — உங்கள் திறனை மாற்றுங்கள்\n"
-            "🪪 *MY PROFILE* — உங்கள் சுயவிவரம்\n🌐 *LANGUAGE* — மொழி மாற்றவும்\n\n"
+            "🏛️ *SUBSIDIES* — அரசு திட்டங்கள்\n"
+            "🛠️ *UPDATE SKILL* — உங்கள் திறனை மாற்றுங்கள்\n"
+            "🪪 *MY PROFILE* — உங்கள் சுயவிவரம்\n"
+            "🌐 *LANGUAGE* — மொழி மாற்றவும்\n\n"
             "HELP என்று அனுப்பினால் இந்த பட்டியல் எப்போதும் வரும்."
         )
     if lang == "HI":
         return (
-            "╔══════════════════════════╗\n║  👷 मजदूर सहायता          ║\n╚══════════════════════════╝\n\n"
-            "📅 *TODAY* — आज का सारांश\n🔍 *VIEW JOBS* — पास की नौकरियाँ देखें\n"
-            "✅ *CONFIRM [id]* — नौकरी स्वीकार करें\n   उदाहरण: CONFIRM 3\n"
-            "👨‍🌾 *MY FARMERS* — स्वीकृत/पूर्ण नौकरियाँ\n📜 *JOB HISTORY* — पुरानी नौकरियाँ\n"
+            "╔══════════════════════════╗\n"
+            "║  👷 मजदूर सहायता          ║\n"
+            "╚══════════════════════════╝\n\n"
+            "📅 *TODAY* — आज का सारांश\n"
+            "🔍 *VIEW JOBS* — पास की नौकरियाँ देखें\n"
+            "✅ *CONFIRM [id]* — नौकरी स्वीकार करें\n"
+            "   उदाहरण: CONFIRM 3\n"
+            "👨‍🌾 *MY FARMERS* — स्वीकृत/पूर्ण नौकरियाँ\n"
+            "📜 *JOB HISTORY* — पुरानी नौकरियाँ\n"
             "📊 *MY DAYS* — MGNREGA दिन गिनती\n"
-            "⭐ *RATE [id] [1-5]* — किसान को रेट करें\n   उदाहरण: RATE 12 4\n"
-            "🚜 *VIEW EQUIPMENT* — किराए के उपकरण देखें\n🔖 *BOOK EQUIPMENT [id]* — उपकरण बुक करें\n"
-            "🏛️ *SUBSIDIES* — सरकारी योजनाएँ\n🛠️ *UPDATE SKILL* — अपना कौशल बदलें\n"
-            "🪪 *MY PROFILE* — अपनी प्रोफ़ाइल देखें\n🌐 *LANGUAGE* — भाषा बदलें\n\n"
+            "⭐ *RATE [id] [1-5]* — किसान को रेट करें\n"
+            "   उदाहरण: RATE 12 4\n"
+            "🚜 *VIEW EQUIPMENT* — किराए के उपकरण देखें\n"
+            "🔖 *BOOK EQUIPMENT [id]* — उपकरण बुक करें\n"
+            "🏛️ *SUBSIDIES* — सरकारी योजनाएँ\n"
+            "🛠️ *UPDATE SKILL* — अपना कौशल बदलें\n"
+            "🪪 *MY PROFILE* — अपनी प्रोफ़ाइल देखें\n"
+            "🌐 *LANGUAGE* — भाषा बदलें\n\n"
             "HELP भेजने पर यह सूची कभी भी देख सकते हैं।"
         )
+    # Default EN
     return (
-        "╔══════════════════════════╗\n║  👷 LABOURER HELP         ║\n╚══════════════════════════╝\n\n"
-        "📅 *TODAY* — Your daily digest\n🔍 *VIEW JOBS* — See jobs near you\n"
-        "✅ *CONFIRM [id]* — Accept a job\n   Example: CONFIRM 3\n"
-        "👨‍🌾 *MY FARMERS* — Accepted/completed jobs\n📜 *JOB HISTORY* — Your full job history\n"
+        "╔══════════════════════════╗\n"
+        "║  👷 LABOURER HELP         ║\n"
+        "╚══════════════════════════╝\n\n"
+        "📅 *TODAY* — Your daily digest\n"
+        "🔍 *VIEW JOBS* — See jobs near you\n"
+        "✅ *CONFIRM [id]* — Accept a job\n"
+        "   Example: CONFIRM 3\n"
+        "👨‍🌾 *MY FARMERS* — Accepted/completed jobs\n"
+        "📜 *JOB HISTORY* — Your full job history\n"
         "📊 *MY DAYS* — MGNREGA 100-day tracker\n"
-        "⭐ *RATE [id] [1-5]* — Rate a farmer after work\n   Example: RATE 12 4\n"
+        "⭐ *RATE [id] [1-5]* — Rate a farmer after work\n"
+        "   Example: RATE 12 4\n"
         "🚜 *VIEW EQUIPMENT* — Browse equipment for rent\n"
-        "🔖 *BOOK EQUIPMENT [id]* — Book equipment\n   Example: BOOK EQUIPMENT 3\n"
-        "🏛️ *SUBSIDIES* — Browse government schemes\n   Example: SUBSIDY 1\n"
+        "🔖 *BOOK EQUIPMENT [id]* — Book equipment\n"
+        "   Example: BOOK EQUIPMENT 3\n"
+        "🏛️ *SUBSIDIES* — Browse government schemes\n"
+        "   Example: SUBSIDY 1\n"
         "🛠️ *UPDATE SKILL* — Change your listed skill\n"
         "🪪 *MY PROFILE* — View your profile & rating\n"
-        "🌐 *LANGUAGE* — Change language (Tamil/Hindi/English)\n\nSend HELP anytime to see this list."
+        "🌐 *LANGUAGE* — Change language (Tamil/Hindi/English)\n\n"
+        "Send HELP anytime to see this list."
     )
 
 def help_unregistered(phone: str) -> str:
     lang = get_lang(phone)
     if lang == "TA":
-        return ("🌾 *Farm Connect உதவி*\n\nநீங்கள் இன்னும் பதிவு செய்யவில்லை.\n\n"
-                "தொடங்க:\n• *FARMER* — விவசாயியாக பதிவு செய்யவும்\n"
-                "• *LABOURER* — தொழிலாளராக பதிவு செய்யவும்\n"
-                "• *LANGUAGE* — மொழி மாற்றவும்\n\nHI என்று அனுப்பி தொடங்கவும்.")
+        return (
+            "🌾 *Farm Connect உதவி*\n\n"
+            "நீங்கள் இன்னும் பதிவு செய்யவில்லை.\n\n"
+            "தொடங்க:\n"
+            "• *FARMER* — விவசாயியாக பதிவு செய்யவும்\n"
+            "• *LABOURER* — தொழிலாளராக பதிவு செய்யவும்\n"
+            "• *LANGUAGE* — மொழி மாற்றவும்\n\n"
+            "HI என்று அனுப்பி தொடங்கவும்."
+        )
     if lang == "HI":
-        return ("🌾 *Farm Connect सहायता*\n\nआप अभी पंजीकृत नहीं हैं।\n\n"
-                "शुरू करने के लिए:\n• *FARMER* — किसान के रूप में पंजीकरण\n"
-                "• *LABOURER* — मजदूर के रूप में पंजीकरण\n"
-                "• *LANGUAGE* — भाषा बदलें\n\nHI भेजकर शुरू करें।")
-    return ("🌾 *Farm Connect Help*\n\nYou're not registered yet.\n\n"
-            "To get started:\n• *FARMER* — Register as a farmer\n"
-            "• *LABOURER* — Register as a labourer\n"
-            "• *LANGUAGE* — Change your language\n\nSend HI to begin.")
+        return (
+            "🌾 *Farm Connect सहायता*\n\n"
+            "आप अभी पंजीकृत नहीं हैं।\n\n"
+            "शुरू करने के लिए:\n"
+            "• *FARMER* — किसान के रूप में पंजीकरण\n"
+            "• *LABOURER* — मजदूर के रूप में पंजीकरण\n"
+            "• *LANGUAGE* — भाषा बदलें\n\n"
+            "HI भेजकर शुरू करें।"
+        )
+    return (
+        "🌾 *Farm Connect Help*\n\n"
+        "You're not registered yet.\n\n"
+        "To get started:\n"
+        "• *FARMER* — Register as a farmer\n"
+        "• *LABOURER* — Register as a labourer\n"
+        "• *LANGUAGE* — Change your language\n\n"
+        "Send HI to begin."
+    )
 
 # ── Menu helpers ──────────────────────────────────────────────────────────────
 def farmer_menu(name: str, phone: str = "") -> str:
-    lang     = get_lang(phone) if phone else "EN"
-    lang_tip = ("🌐 LANGUAGE — மொழி மாற்றவும்" if lang == "TA" else
-                "🌐 LANGUAGE — भाषा बदलें"       if lang == "HI" else
-                "🌐 LANGUAGE — Change language")
+    lang = get_lang(phone) if phone else "EN"
+    lang_tip = "🌐 LANGUAGE — மொழி மாற்றவும்" if lang == "TA" else (
+               "🌐 LANGUAGE — भाषा बदलें" if lang == "HI" else
+               "🌐 LANGUAGE — Change language")
     if lang == "TA":
-        return (f"வணக்கம் {name}! 🌾 இன்று என்ன உதவி வேண்டும்?\n\n"
-                f"╔══════════════════════╗\n║  🌾 விவசாயி மெனு      ║\n╚══════════════════════╝\n\n"
-                f"📅 TODAY — தினசரி சுருக்கம்\n📋 POST JOB — புதிய வேலை போடுங்கள்\n"
-                f"📂 MY JOBS — உங்கள் வேலைகள்\n👥 MY LABOURERS — தொழிலாளர் பட்டியல்\n"
-                f"✅ JOB DONE [id] — வேலை முடிந்தது\n🔁 REHIRE [id] — மீண்டும் அழையுங்கள்\n"
-                f"🚜 RENT EQUIPMENT — உபகரணம் வாடகை\n🔧 MY EQUIPMENT — உங்கள் உபகரணங்கள்\n"
-                f"🏛️ SUBSIDIES — அரசு திட்டங்கள்\n🪪 MY PROFILE — சுயவிவரம்\n"
-                f"{lang_tip}\n\n💡 HELP என்று அனுப்பி முழு விவரம் பெறுங்கள்.")
+        return (
+            f"வணக்கம் {name}! 🌾 இன்று என்ன உதவி வேண்டும்?\n\n"
+            f"╔══════════════════════╗\n"
+            f"║  🌾 விவசாயி மெனு      ║\n"
+            f"╚══════════════════════╝\n\n"
+            f"📅 TODAY — தினசரி சுருக்கம்\n"
+            f"📋 POST JOB — புதிய வேலை போடுங்கள்\n"
+            f"📂 MY JOBS — உங்கள் வேலைகள்\n"
+            f"👥 MY LABOURERS — தொழிலாளர் பட்டியல்\n"
+            f"✅ JOB DONE [id] — வேலை முடிந்தது\n"
+            f"🔁 REHIRE [id] — மீண்டும் அழையுங்கள்\n"
+            f"🚜 RENT EQUIPMENT — உபகரணம் வாடகை\n"
+            f"🔧 MY EQUIPMENT — உங்கள் உபகரணங்கள்\n"
+            f"🏛️ SUBSIDIES — அரசு திட்டங்கள்\n"
+            f"🪪 MY PROFILE — சுயவிவரம்\n"
+            f"{lang_tip}\n\n"
+            f"💡 HELP என்று அனுப்பி முழு விவரம் பெறுங்கள்."
+        )
     if lang == "HI":
-        return (f"नमस्ते {name}! 🌾 आज कैसे मदद करूँ?\n\n"
-                f"╔══════════════════════╗\n║  🌾 किसान मेनू         ║\n╚══════════════════════╝\n\n"
-                f"📅 TODAY — आज का सारांश\n📋 POST JOB — नई नौकरी पोस्ट करें\n"
-                f"📂 MY JOBS — अपनी नौकरियाँ देखें\n👥 MY LABOURERS — मजदूरों की सूची\n"
-                f"✅ JOB DONE [id] — काम पूरा मार्क करें\n🔁 REHIRE [id] — दोबारा बुलाएँ\n"
-                f"🚜 RENT EQUIPMENT — उपकरण किराए पर दें\n🔧 MY EQUIPMENT — अपने उपकरण देखें\n"
-                f"🏛️ SUBSIDIES — सरकारी योजनाएँ\n🪪 MY PROFILE — प्रोफ़ाइल देखें\n"
-                f"{lang_tip}\n\n💡 HELP भेजें — पूरी कमांड सूची देखें।")
-    return (f"Hello {name}! 🌾 How can I help you today?\n\n"
-            f"╔══════════════════════╗\n║  🌾 FARMER MENU      ║\n╚══════════════════════╝\n\n"
-            f"📅 TODAY — Your daily digest\n📋 POST JOB — Post a new job\n"
-            f"📂 MY JOBS — View your posted jobs\n👥 MY LABOURERS — Accepted/completed jobs\n"
-            f"✅ JOB DONE [id] — Mark a job as completed\n🔁 REHIRE [id] — Invite a past labourer again\n"
-            f"🚜 RENT EQUIPMENT — List equipment for rent\n🔧 MY EQUIPMENT — View your listings\n"
-            f"🏛️ SUBSIDIES — Government schemes\n🪪 MY PROFILE — View your profile\n"
-            f"{lang_tip}\n\n💡 Send HELP anytime for the full command list.")
+        return (
+            f"नमस्ते {name}! 🌾 आज कैसे मदद करूँ?\n\n"
+            f"╔══════════════════════╗\n"
+            f"║  🌾 किसान मेनू         ║\n"
+            f"╚══════════════════════╝\n\n"
+            f"📅 TODAY — आज का सारांश\n"
+            f"📋 POST JOB — नई नौकरी पोस्ट करें\n"
+            f"📂 MY JOBS — अपनी नौकरियाँ देखें\n"
+            f"👥 MY LABOURERS — मजदूरों की सूची\n"
+            f"✅ JOB DONE [id] — काम पूरा मार्क करें\n"
+            f"🔁 REHIRE [id] — दोबारा बुलाएँ\n"
+            f"🚜 RENT EQUIPMENT — उपकरण किराए पर दें\n"
+            f"🔧 MY EQUIPMENT — अपने उपकरण देखें\n"
+            f"🏛️ SUBSIDIES — सरकारी योजनाएँ\n"
+            f"🪪 MY PROFILE — प्रोफ़ाइल देखें\n"
+            f"{lang_tip}\n\n"
+            f"💡 HELP भेजें — पूरी कमांड सूची देखें।"
+        )
+    return (
+        f"Hello {name}! 🌾 How can I help you today?\n\n"
+        f"╔══════════════════════╗\n"
+        f"║  🌾 FARMER MENU      ║\n"
+        f"╚══════════════════════╝\n\n"
+        f"📅 TODAY — Your daily digest\n"
+        f"📋 POST JOB — Post a new job\n"
+        f"📂 MY JOBS — View your posted jobs\n"
+        f"👥 MY LABOURERS — Accepted/completed jobs\n"
+        f"✅ JOB DONE [id] — Mark a job as completed\n"
+        f"🔁 REHIRE [id] — Invite a past labourer again\n"
+        f"🚜 RENT EQUIPMENT — List equipment for rent\n"
+        f"🔧 MY EQUIPMENT — View your listings\n"
+        f"🏛️ SUBSIDIES — Government schemes\n"
+        f"🪪 MY PROFILE — View your profile\n"
+        f"{lang_tip}\n\n"
+        f"💡 Send HELP anytime for the full command list."
+    )
 
 def labourer_menu(name: str, phone: str = "") -> str:
-    lang     = get_lang(phone) if phone else "EN"
-    lang_tip = ("🌐 LANGUAGE — மொழி மாற்றவும்" if lang == "TA" else
-                "🌐 LANGUAGE — भाषा बदलें"       if lang == "HI" else
-                "🌐 LANGUAGE — Change language")
+    lang = get_lang(phone) if phone else "EN"
+    lang_tip = "🌐 LANGUAGE — மொழி மாற்றவும்" if lang == "TA" else (
+               "🌐 LANGUAGE — भाषा बदलें" if lang == "HI" else
+               "🌐 LANGUAGE — Change language")
     if lang == "TA":
-        return (f"வணக்கம் {name}! 👋 இன்று என்ன உதவி வேண்டும்?\n\n"
-                f"╔══════════════════════╗\n║  👷 தொழிலாளர் மெனு   ║\n╚══════════════════════╝\n\n"
-                f"📅 TODAY — தினசரி சுருக்கம்\n🔍 VIEW JOBS — அருகிலுள்ள வேலைகள்\n"
-                f"👨‍🌾 MY FARMERS — விவசாயி பட்டியல்\n📜 JOB HISTORY — கடந்த வேலைகள்\n"
-                f"📊 MY DAYS — MGNREGA நாள் கணக்கு\n🚜 VIEW EQUIPMENT — உபகரணங்கள்\n"
-                f"🏛️ SUBSIDIES — அரசு திட்டங்கள்\n🛠️ UPDATE SKILL — திறன் மாற்று\n"
-                f"🪪 MY PROFILE — சுயவிவரம்\n{lang_tip}\n\n"
-                f"💡 HELP என்று அனுப்பி முழு விவரம் பெறுங்கள்.")
+        return (
+            f"வணக்கம் {name}! 👋 இன்று என்ன உதவி வேண்டும்?\n\n"
+            f"╔══════════════════════╗\n"
+            f"║  👷 தொழிலாளர் மெனு   ║\n"
+            f"╚══════════════════════╝\n\n"
+            f"📅 TODAY — தினசரி சுருக்கம்\n"
+            f"🔍 VIEW JOBS — அருகிலுள்ள வேலைகள்\n"
+            f"👨‍🌾 MY FARMERS — விவசாயி பட்டியல்\n"
+            f"📜 JOB HISTORY — கடந்த வேலைகள்\n"
+            f"📊 MY DAYS — MGNREGA நாள் கணக்கு\n"
+            f"🚜 VIEW EQUIPMENT — உபகரணங்கள்\n"
+            f"🏛️ SUBSIDIES — அரசு திட்டங்கள்\n"
+            f"🛠️ UPDATE SKILL — திறன் மாற்று\n"
+            f"🪪 MY PROFILE — சுயவிவரம்\n"
+            f"{lang_tip}\n\n"
+            f"💡 HELP என்று அனுப்பி முழு விவரம் பெறுங்கள்."
+        )
     if lang == "HI":
-        return (f"नमस्ते {name}! 👋 आज कैसे मदद करूँ?\n\n"
-                f"╔══════════════════════╗\n║  👷 मजदूर मेनू         ║\n╚══════════════════════╝\n\n"
-                f"📅 TODAY — आज का सारांश\n🔍 VIEW JOBS — पास की नौकरियाँ\n"
-                f"👨‍🌾 MY FARMERS — किसानों की सूची\n📜 JOB HISTORY — पुरानी नौकरियाँ\n"
-                f"📊 MY DAYS — MGNREGA दिन गिनती\n🚜 VIEW EQUIPMENT — उपकरण देखें\n"
-                f"🏛️ SUBSIDIES — सरकारी योजनाएँ\n🛠️ UPDATE SKILL — कौशल बदलें\n"
-                f"🪪 MY PROFILE — प्रोफ़ाइल देखें\n{lang_tip}\n\n"
-                f"💡 HELP भेजें — पूरी कमांड सूची देखें।")
-    return (f"Hello {name}! 👋 How can I help you today?\n\n"
-            f"╔══════════════════════╗\n║  👷 LABOURER MENU    ║\n╚══════════════════════╝\n\n"
-            f"📅 TODAY — Your daily digest\n🔍 VIEW JOBS — See jobs near you\n"
-            f"👨‍🌾 MY FARMERS — Accepted/completed jobs\n📜 JOB HISTORY — Your past jobs\n"
-            f"📊 MY DAYS — MGNREGA day tracker\n🚜 VIEW EQUIPMENT — Browse equipment for rent\n"
-            f"🏛️ SUBSIDIES — Government schemes\n🛠️ UPDATE SKILL — Change your listed skill\n"
-            f"🪪 MY PROFILE — View your profile\n{lang_tip}\n\n"
-            f"💡 Send HELP anytime for the full command list.")
+        return (
+            f"नमस्ते {name}! 👋 आज कैसे मदद करूँ?\n\n"
+            f"╔══════════════════════╗\n"
+            f"║  👷 मजदूर मेनू         ║\n"
+            f"╚══════════════════════╝\n\n"
+            f"📅 TODAY — आज का सारांश\n"
+            f"🔍 VIEW JOBS — पास की नौकरियाँ\n"
+            f"👨‍🌾 MY FARMERS — किसानों की सूची\n"
+            f"📜 JOB HISTORY — पुरानी नौकरियाँ\n"
+            f"📊 MY DAYS — MGNREGA दिन गिनती\n"
+            f"🚜 VIEW EQUIPMENT — उपकरण देखें\n"
+            f"🏛️ SUBSIDIES — सरकारी योजनाएँ\n"
+            f"🛠️ UPDATE SKILL — कौशल बदलें\n"
+            f"🪪 MY PROFILE — प्रोफ़ाइल देखें\n"
+            f"{lang_tip}\n\n"
+            f"💡 HELP भेजें — पूरी कमांड सूची देखें।"
+        )
+    return (
+        f"Hello {name}! 👋 How can I help you today?\n\n"
+        f"╔══════════════════════╗\n"
+        f"║  👷 LABOURER MENU    ║\n"
+        f"╚══════════════════════╝\n\n"
+        f"📅 TODAY — Your daily digest\n"
+        f"🔍 VIEW JOBS — See jobs near you\n"
+        f"👨‍🌾 MY FARMERS — Accepted/completed jobs\n"
+        f"📜 JOB HISTORY — Your past jobs\n"
+        f"📊 MY DAYS — MGNREGA day tracker\n"
+        f"🚜 VIEW EQUIPMENT — Browse equipment for rent\n"
+        f"🏛️ SUBSIDIES — Government schemes\n"
+        f"🛠️ UPDATE SKILL — Change your listed skill\n"
+        f"🪪 MY PROFILE — View your profile\n"
+        f"{lang_tip}\n\n"
+        f"💡 Send HELP anytime for the full command list."
+    )
 
 def welcome_back(phone: str) -> str | None:
     farmer = get_from_db("farmers", phone)
-    if farmer:   return farmer_menu(farmer["name"], phone)
+    if farmer:
+        return farmer_menu(farmer["name"], phone)
     labourer = get_from_db("labourers", phone)
-    if labourer: return labourer_menu(labourer["name"], phone)
+    if labourer:
+        return labourer_menu(labourer["name"], phone)
     return None
 
 # ── Core message handler ──────────────────────────────────────────────────────
@@ -1914,12 +1392,13 @@ def handle_message(phone: str, raw_body: str) -> str:
     step = sessions[phone].get("step", "start")
     print(f"[SESSION] step='{step}' | session={sessions[phone]}")
 
-    # ── LANGUAGE command — available at ALL steps ──────────────────────────
+    # ── LANGUAGE command — available at ALL steps ─────────────────────────────
     if message == "LANGUAGE":
-        sessions[phone]["prev_step"] = step
+        sessions[phone]["prev_step"] = step   # remember where to return after selection
         sessions[phone]["step"] = "language"
         return t("language_prompt", phone)
 
+    # ── LANGUAGE selection step ────────────────────────────────────────────────
     if step == "language":
         lang_key = SUPPORTED_LANGS.get(message)
         if not lang_key:
@@ -1927,42 +1406,60 @@ def handle_message(phone: str, raw_body: str) -> str:
         set_lang(phone, lang_key)
         prev = sessions[phone].pop("prev_step", "done")
         sessions[phone]["step"] = prev
+        # Confirmation message is already in the user's NEW language
         conf = t("language_set", phone)
+        # If they were at done, give them the menu right after
         if prev == "done":
             menu = welcome_back(phone)
             if menu:
                 return f"{conf}\n\n{menu}"
         return conf
 
-    # ── START ──────────────────────────────────────────────────────────────
+    # ── START ─────────────────────────────────────────────────────────────────
     if step == "start":
         farmer = get_from_db("farmers", phone)
         if farmer:
             sessions[phone] = {"step": "done", "role": "farmer"}
-            return farmer_menu(farmer["name"], phone)
+            return farmer_menu(farmer["name"], phone).replace(
+                f"Hello {farmer['name']}!", f"Welcome back, {farmer['name']}! 🌾"
+            ).replace(
+                f"வணக்கம் {farmer['name']}!", f"மீண்டும் வரவேற்கிறோம், {farmer['name']}! 🌾"
+            ).replace(
+                f"नमस्ते {farmer['name']}!", f"वापस आपका स्वागत है, {farmer['name']}! 🌾"
+            )
         labourer = get_from_db("labourers", phone)
         if labourer:
             sessions[phone] = {"step": "done", "role": "labourer"}
-            return labourer_menu(labourer["name"], phone)
+            return labourer_menu(labourer["name"], phone).replace(
+                f"Hello {labourer['name']}!", f"Welcome back, {labourer['name']}! 👋"
+            ).replace(
+                f"வணக்கம் {labourer['name']}!", f"மீண்டும் வரவேற்கிறோம், {labourer['name']}! 👋"
+            ).replace(
+                f"नमस्ते {labourer['name']}!", f"वापस आपका स्वागत है, {labourer['name']}! 👋"
+            )
         sessions[phone]["step"] = "role"
         return t("welcome_new", phone)
 
-    # ── REGISTRATION ───────────────────────────────────────────────────────
+    # ── REGISTRATION ──────────────────────────────────────────────────────────
     elif step == "role":
         if message in ("FARMER", "LABOURER"):
             opposite_table = "labourers" if message == "FARMER" else "farmers"
-            opposite_role  = "labourer"  if message == "FARMER" else "farmer"
-            existing = get_from_db(opposite_table, phone)
-            if existing:
+            opposite_role  = "labourer" if message == "FARMER" else "farmer"
+            existing_opposite = get_from_db(opposite_table, phone)
+            if existing_opposite:
                 sessions[phone] = {"step": "done", "role": opposite_role}
-                menu = (farmer_menu(existing["name"], phone) if opposite_role == "farmer"
-                        else labourer_menu(existing["name"], phone))
-                return t("already_registered_as", phone,
-                         role=opposite_role.upper(), name=existing["name"], menu=menu)
+                menu = (farmer_menu(existing_opposite["name"], phone) if opposite_role == "farmer"
+                        else labourer_menu(existing_opposite["name"], phone))
+                return (
+                    f"⚠️ This number is already registered as a *{opposite_role.upper()}* "
+                    f"({existing_opposite['name']}).\n\n"
+                    f"A phone number can only be registered under one role.\n\n"
+                    f"{menu}"
+                )
             sessions[phone]["role"] = message.lower()
             sessions[phone]["step"] = "name"
             return t("ask_name", phone)
-        return t("reply_farmer_or_labourer", phone)
+        return "Please reply with FARMER or LABOURER only."
 
     elif step == "name":
         sessions[phone]["name"] = raw_body
@@ -1975,26 +1472,28 @@ def handle_message(phone: str, raw_body: str) -> str:
         if role == "labourer":
             sessions[phone]["step"] = "skill"
             return skill_prompt_for(phone)
-        saved = save_to_db("farmers", {
-            "phone":    phone,
-            "name":     sessions[phone]["name"],
-            "location": sessions[phone]["location"]
-        })
-        if not saved:
-            return t("error_saving", phone)
-        sessions[phone]["step"] = "done"
-        return t("registered_farmer", phone,
-                 name=sessions[phone]["name"], location=sessions[phone]["location"])
+        else:
+            saved = save_to_db("farmers", {
+                "phone": phone,
+                "name": sessions[phone]["name"],
+                "location": sessions[phone]["location"]
+            })
+            if not saved:
+                return t("error_saving", phone)
+            sessions[phone]["step"] = "done"
+            return t("registered_farmer", phone,
+                     name=sessions[phone]["name"],
+                     location=sessions[phone]["location"])
 
     elif step == "skill":
         skill = SKILL_MAP.get(message)
         if not skill:
-            return t("skill_invalid", phone, prompt=skill_prompt_for(phone))
+            return f"Please reply with a number 1-6 or skill name.\n\n{skill_prompt_for(phone)}"
         saved = save_to_db("labourers", {
-            "phone":    phone,
-            "name":     sessions[phone]["name"],
+            "phone": phone,
+            "name": sessions[phone]["name"],
             "location": sessions[phone]["location"],
-            "skill":    skill
+            "skill": skill
         })
         if not saved:
             return t("error_saving", phone)
@@ -2005,234 +1504,305 @@ def handle_message(phone: str, raw_body: str) -> str:
                  location=sessions[phone]["location"],
                  skill=skill)
 
-    # ── UPDATE SKILL FLOW ──────────────────────────────────────────────────
+    # ── UPDATE SKILL FLOW ─────────────────────────────────────────────────────
     elif step == "update_skill":
         skill = SKILL_MAP.get(message)
         if not skill:
-            return t("skill_invalid", phone, prompt=skill_prompt_for(phone))
+            return f"Please reply with a number 1-6 or skill name.\n\n{skill_prompt_for(phone)}"
         updated = update_db("labourers", {"phone": phone}, {"skill": skill})
         sessions[phone]["step"] = "done"
         if not updated:
-            return t("skill_update_error", phone)
-        return t("skill_updated", phone, skill=skill)
+            return "⚠️ Error updating your skill. Please try again by sending UPDATE SKILL."
+        return f"✅ Your skill has been updated to *{skill}*.\n\nReply VIEW JOBS to see work near you."
 
-    # ── MAIN MENU (step == "done") ─────────────────────────────────────────
+    # ── MAIN MENU ─────────────────────────────────────────────────────────────
     elif step == "done":
         print(f"[FLOW] DONE menu — message='{message}'")
 
+        # ── HELP ─────────────────────────────────────────────────────────────
+        # Explicit HELP command gives the detailed command reference.
+        # Greeting keywords (incl. HELP in GREETINGS) give the short menu.
         if message == "HELP":
             farmer = get_from_db("farmers", phone)
-            if farmer:   return help_farmer(phone)
+            if farmer:
+                return help_farmer(phone)
             labourer = get_from_db("labourers", phone)
-            if labourer: return help_labourer(phone)
+            if labourer:
+                return help_labourer(phone)
             return help_unregistered(phone)
 
+        # ── Greeting / menu intercept ─────────────────────────────────────────
         normalised = message.strip("!?.👋🌾 ")
         if normalised in GREETINGS or message in GREETINGS:
             menu = welcome_back(phone)
-            if menu: return menu
+            if menu:
+                return menu
             sessions[phone] = {"step": "start"}
             return t("welcome_new", phone)
 
-        # UPDATE SKILL
+        # ── UPDATE SKILL ──────────────────────────────────────────────────────
         if message == "UPDATE SKILL":
             labourer = get_from_db("labourers", phone)
             if not labourer:
-                return t("labourers_only", phone)
+                return "❌ Only registered labourers can update their skill."
             sessions[phone]["step"] = "update_skill"
-            current = labourer.get("skill") or t("profile_skill_not_set", phone)
-            return t("update_skill_prompt", phone, skill=current, prompt=skill_prompt_for(phone))
+            current = labourer.get("skill") or "Not set"
+            return (
+                f"🛠️ Your current skill: *{current}*\n\n"
+                f"{skill_prompt_for(phone)}"
+            )
 
-        # POST JOB
+        # ── POST JOB ──────────────────────────────────────────────────────────
         elif message == "POST JOB":
             farmer = get_from_db("farmers", phone)
             if not farmer:
-                return t("farmers_only", phone)
+                return "❌ Only registered farmers can post jobs."
             sessions[phone]["step"] = "job_work_type"
-            sessions[phone]["job"]  = {}
-            return t("post_job_start", phone)
+            sessions[phone]["job"] = {}
+            return (
+                "📋 *Let's post your job!*\n\n"
+                "What type of work is needed?\n"
+                "(e.g. Harvesting, Planting, Irrigation, Weeding)"
+            )
 
-        # MY PROFILE
+        # ── MY PROFILE ────────────────────────────────────────────────────────
         elif message == "MY PROFILE":
             farmer = get_from_db("farmers", phone)
             if farmer:
-                total_posted   = count_jobs_posted_by_farmer(phone)
-                rating         = farmer.get("rating")
-                total_ratings  = farmer.get("total_ratings", 0)
-                s              = "s" if total_ratings != 1 else ""
-                rating_str     = (t("profile_rating_str", phone, rating=rating, count=total_ratings, s=s)
-                                  if rating and total_ratings else t("profile_no_rating", phone))
+                total_posted = count_jobs_posted_by_farmer(phone)
+                rating = farmer.get("rating")
+                total_ratings = farmer.get("total_ratings", 0)
+                if rating and total_ratings:
+                    rating_str = f"{rating}⭐ ({total_ratings} rating{'s' if total_ratings != 1 else ''})"
+                else:
+                    rating_str = "No ratings yet"
                 penalty_balance = farmer.get("penalty_balance", 0) or 0
-                penalty_line    = t("profile_penalty_line", phone, amount=penalty_balance) if penalty_balance else ""
-                lang_label      = {"EN": "English", "TA": "தமிழ்", "HI": "हिंदी"}.get(get_lang(phone), "English")
-                return t("profile_farmer", phone,
-                         name=farmer["name"], location=farmer["location"],
-                         rating_str=rating_str, total_posted=total_posted,
-                         lang_label=lang_label, penalty_line=penalty_line)
+                penalty_line = f"⚠️ Penalty owed: ₹{penalty_balance}\n" if penalty_balance else ""
+                lang_label = {"EN": "English", "TA": "தமிழ்", "HI": "हिंदी"}.get(get_lang(phone), "English")
+                return (
+                    f"🪪 *My Profile*\n\n"
+                    f"👤 Name: {farmer['name']}\n"
+                    f"🧾 Role: Farmer\n"
+                    f"📍 Location: {farmer['location']}\n"
+                    f"⭐ Rating: {rating_str}\n"
+                    f"📋 Total jobs posted: {total_posted}\n"
+                    f"🌐 Language: {lang_label}\n"
+                    f"{penalty_line}\n"
+                    f"Reply POST JOB to post a new job."
+                )
             labourer = get_from_db("labourers", phone)
             if labourer:
-                total_done     = count_jobs_done_by_labourer(phone)
-                rating         = labourer.get("rating")
-                total_ratings  = labourer.get("total_ratings", 0)
-                no_show        = labourer.get("no_show_count", 0)
-                s              = "s" if total_ratings != 1 else ""
-                rating_str     = (t("profile_rating_str", phone, rating=rating, count=total_ratings, s=s)
-                                  if rating and total_ratings else t("profile_no_rating", phone))
-                no_show_line    = t("profile_no_show_line", phone, count=no_show) if no_show else ""
+                total_done = count_jobs_done_by_labourer(phone)
+                rating = labourer.get("rating")
+                total_ratings = labourer.get("total_ratings", 0)
+                no_show = labourer.get("no_show_count", 0)
+                if rating and total_ratings:
+                    rating_str = f"{rating}⭐ ({total_ratings} rating{'s' if total_ratings != 1 else ''})"
+                else:
+                    rating_str = "No ratings yet"
+                no_show_line = f"⚠️ No-shows reported: {no_show}\n" if no_show else ""
                 penalty_balance = labourer.get("penalty_balance", 0) or 0
-                penalty_line    = t("profile_penalty_line", phone, amount=penalty_balance) if penalty_balance else ""
-                lang_label      = {"EN": "English", "TA": "தமிழ்", "HI": "हिंदी"}.get(get_lang(phone), "English")
-                skill_val       = labourer.get("skill") or t("profile_skill_not_set", phone)
-                return t("profile_labourer", phone,
-                         name=labourer["name"], location=labourer["location"],
-                         skill=skill_val, rating_str=rating_str, total_done=total_done,
-                         lang_label=lang_label, no_show_line=no_show_line, penalty_line=penalty_line)
+                penalty_line = f"⚠️ Penalty owed: ₹{penalty_balance}\n" if penalty_balance else ""
+                lang_label = {"EN": "English", "TA": "தமிழ்", "HI": "हिंदी"}.get(get_lang(phone), "English")
+                return (
+                    f"🪪 *My Profile*\n\n"
+                    f"👤 Name: {labourer['name']}\n"
+                    f"🧾 Role: Labourer\n"
+                    f"📍 Location: {labourer['location']}\n"
+                    f"🛠️ Skill: {labourer.get('skill') or 'Not set — reply UPDATE SKILL to set it'}\n"
+                    f"⭐ Rating: {rating_str}\n"
+                    f"✅ Total jobs completed: {total_done}\n"
+                    f"🌐 Language: {lang_label}\n"
+                    f"{no_show_line}"
+                    f"{penalty_line}\n"
+                    f"Reply VIEW JOBS to find more work."
+                )
             return t("register_first", phone)
 
-        # MY LABOURERS
+        # ── MY LABOURERS ──────────────────────────────────────────────────────
         elif message == "MY LABOURERS":
             farmer = get_from_db("farmers", phone)
-            if not farmer: return t("farmers_only", phone)
+            if not farmer:
+                return "❌ Only farmers can use this command."
             pending   = get_confirmed_jobs_for_farmer(phone)
             completed = get_completed_jobs_for_farmer(phone)
             if not pending and not completed:
-                return t("my_labourers_empty", phone)
+                return "No accepted jobs found.\nReply POST JOB to post one."
             msg = ""
             if pending:
-                msg += t("my_labourers_pending_header", phone)
+                msg += "👥 *Accepted — Not Yet Completed:*\n\n"
                 for job in pending:
-                    lab   = get_from_db("labourers", job.get("labourer_phone")) if job.get("labourer_phone") else None
-                    lname = lab["name"] if lab else t("unknown_name", phone)
-                    ns    = lab.get("no_show_count", 0) if lab else 0
-                    flag  = t("no_show_flag", phone, count=ns) if ns else ""
-                    msg  += (f"🔹 Job #{job['id']}\n"
-                             f"   Work: {job['work_type']} | Date: {job['start_date']}\n"
-                             f"   Labourer: {lname}{flag}\n"
-                             f"   {t('in_progress', phone)}\n\n")
-                msg += t("my_labourers_pending_footer", phone)
+                    labourer_phone = job.get("labourer_phone")
+                    labourer = get_from_db("labourers", labourer_phone) if labourer_phone else None
+                    labourer_name = labourer["name"] if labourer else "Unknown"
+                    no_show = labourer.get("no_show_count", 0) if labourer else 0
+                    flag = f" ⚠️ {no_show} past no-show(s)" if no_show else ""
+                    msg += (
+                        f"🔹 Job #{job['id']}\n"
+                        f"   Work: {job['work_type']} | Date: {job['start_date']}\n"
+                        f"   Labourer: {labourer_name}{flag}\n"
+                        f"   🕓 In progress\n\n"
+                    )
+                msg += "Reply JOB DONE [job_id] once the work is finished.\nExample: JOB DONE 12\n"
+                msg += "If they didn't show up, reply NO SHOW [job_id] instead.\n\n"
             if completed:
-                msg += t("my_labourers_completed_header", phone)
+                msg += "✅ *Completed Jobs:*\n\n"
                 for job in completed:
-                    rated = t("rated_label", phone) if job.get("rated") else t("not_rated_label", phone)
-                    lab   = get_from_db("labourers", job.get("labourer_phone")) if job.get("labourer_phone") else None
-                    lname = lab["name"] if lab else t("unknown_name", phone)
-                    rstr  = f" ({lab['rating']}⭐)" if lab and lab.get("rating") else ""
-                    msg  += (f"🔹 Job #{job['id']}\n"
-                             f"   Work: {job['work_type']} | Date: {job['start_date']}\n"
-                             f"   Labourer: {lname}{rstr}\n   {rated}\n\n")
-                msg += t("my_labourers_completed_footer", phone)
+                    rated = "✅ Rated" if job.get("rated") else "⭐ Not rated yet"
+                    labourer_phone = job.get("labourer_phone")
+                    labourer = get_from_db("labourers", labourer_phone) if labourer_phone else None
+                    labourer_name = labourer["name"] if labourer else "Unknown"
+                    rating_str = f" ({labourer['rating']}⭐)" if labourer and labourer.get("rating") else ""
+                    msg += (
+                        f"🔹 Job #{job['id']}\n"
+                        f"   Work: {job['work_type']} | Date: {job['start_date']}\n"
+                        f"   Labourer: {labourer_name}{rating_str}\n"
+                        f"   {rated}\n\n"
+                    )
+                msg += "Reply RATE [job_id] [1-5] to rate a labourer.\nExample: RATE 12 5\n"
+                msg += "Worked well with someone? Reply REHIRE [job_id] to invite them again."
             return msg
 
-        # REHIRE
+        # ── REHIRE ────────────────────────────────────────────────────────────
         elif message.startswith("REHIRE"):
             parts = raw_body.split()
             if len(parts) < 2 or not parts[1].isdigit():
-                return t("bad_format_id", phone, fmt="REHIRE [job_id]", ex="REHIRE 12")
+                return "❓ Couldn't read that.\n\nFormat: REHIRE [job_id]\nExample: REHIRE 12"
             job_id = parts[1]
             farmer = get_from_db("farmers", phone)
-            if not farmer: return t("rehire_not_farmer", phone)
+            if not farmer:
+                return "❌ Only farmers can use REHIRE."
             try:
-                res    = req.get(f"{SUPABASE_URL}/rest/v1/jobs?id=eq.{job_id}", headers=HEADERS, timeout=10)
+                url = f"{SUPABASE_URL}/rest/v1/jobs?id=eq.{job_id}"
+                res = req.get(url, headers=HEADERS, timeout=10)
                 lookup = res.json()
             except Exception:
-                return t("db_fetch_error", phone)
+                return "❌ Could not fetch that job. Try again."
             if not lookup or lookup[0].get("farmer_phone") != phone:
-                return t("rehire_job_not_found", phone)
-            old_job        = lookup[0]
+                return "❌ Job not found, or it's not one of your jobs."
+            old_job = lookup[0]
             labourer_phone = old_job.get("labourer_phone")
-            if not labourer_phone: return t("rehire_no_labourer", phone)
+            if not labourer_phone:
+                return "❌ That job doesn't have a labourer on record to rehire."
             labourer = get_from_db("labourers", labourer_phone)
-            if not labourer: return t("rehire_labourer_not_found", phone)
-            sessions[phone]["step"]   = "rehire_work_type"
+            if not labourer:
+                return "❌ Could not find that labourer's profile anymore."
+            sessions[phone]["step"] = "rehire_work_type"
             sessions[phone]["rehire"] = {
-                "work_type":     old_job["work_type"],
+                "work_type": old_job["work_type"],
                 "num_labourers": old_job.get("num_labourers", 1),
-                "wage":          old_job["wage"],
+                "wage": old_job["wage"],
                 "labourer_phone": labourer_phone,
-                "labourer_name":  labourer["name"],
+                "labourer_name": labourer["name"],
             }
-            return t("rehire_start", phone,
-                     labourer_name=labourer["name"], work_type=old_job["work_type"])
+            return (
+                f"🔁 *Rehire {labourer['name']}*\n\n"
+                f"Let's set up the new job. You can change any detail, or reply "
+                f"*SAME* / *KEEP* at each step to reuse the last value.\n\n"
+                f"🔨 Work type (last time: *{old_job['work_type']}*):"
+            )
 
-        # MY FARMERS
+        # ── MY FARMERS ────────────────────────────────────────────────────────
         elif message == "MY FARMERS":
             labourer = get_from_db("labourers", phone)
-            if not labourer: return t("labourers_only", phone)
+            if not labourer:
+                return "❌ Only labourers can use this command."
             pending   = get_confirmed_jobs_for_labourer(phone)
             completed = get_completed_jobs_for_labourer(phone)
             if not pending and not completed:
-                return t("my_farmers_empty", phone)
+                return "No accepted jobs found.\nReply VIEW JOBS to find work."
             msg = ""
             if pending:
-                msg += t("my_farmers_pending_header", phone)
+                msg += "👨‍🌾 *Accepted — Not Yet Completed:*\n\n"
                 for job in pending:
-                    f_rec  = get_from_db("farmers", job.get("farmer_phone")) if job.get("farmer_phone") else None
-                    fname  = f_rec["name"] if f_rec else t("unknown_name", phone)
-                    msg   += (f"🔹 Job #{job['id']}\n"
-                              f"   Work: {job['work_type']} | Date: {job['start_date']}\n"
-                              f"   Farmer: {fname}\n"
-                              f"   {t('my_farmers_pending_waiting', phone)}\n\n")
+                    farmer_phone = job.get("farmer_phone")
+                    farmer = get_from_db("farmers", farmer_phone) if farmer_phone else None
+                    farmer_name = farmer["name"] if farmer else "Unknown"
+                    msg += (
+                        f"🔹 Job #{job['id']}\n"
+                        f"   Work: {job['work_type']} | Date: {job['start_date']}\n"
+                        f"   Farmer: {farmer_name}\n"
+                        f"   🕓 Waiting for farmer to mark JOB DONE\n\n"
+                    )
             if completed:
-                msg += t("my_farmers_completed_header", phone)
+                msg += "✅ *Completed Jobs:*\n\n"
                 for job in completed:
-                    rated  = t("rated_label", phone) if job.get("labourer_rated") else t("not_rated_label", phone)
-                    f_rec  = get_from_db("farmers", job.get("farmer_phone")) if job.get("farmer_phone") else None
-                    fname  = f_rec["name"] if f_rec else t("unknown_name", phone)
-                    rstr   = f" ({f_rec['rating']}⭐)" if f_rec and f_rec.get("rating") else ""
-                    msg   += (f"🔹 Job #{job['id']}\n"
-                              f"   Work: {job['work_type']} | Date: {job['start_date']}\n"
-                              f"   Farmer: {fname}{rstr}\n   {rated}\n\n")
-                msg += t("my_farmers_completed_footer", phone)
+                    rated = "✅ Rated" if job.get("labourer_rated") else "⭐ Not rated yet"
+                    farmer_phone = job.get("farmer_phone")
+                    farmer = get_from_db("farmers", farmer_phone) if farmer_phone else None
+                    farmer_name = farmer["name"] if farmer else "Unknown"
+                    rating_str = f" ({farmer['rating']}⭐)" if farmer and farmer.get("rating") else ""
+                    msg += (
+                        f"🔹 Job #{job['id']}\n"
+                        f"   Work: {job['work_type']} | Date: {job['start_date']}\n"
+                        f"   Farmer: {farmer_name}{rating_str}\n"
+                        f"   {rated}\n\n"
+                    )
+                msg += "Reply RATE [job_id] [1-5] to rate a farmer.\nExample: RATE 12 5"
             return msg
 
-        # JOB HISTORY
+        # ── JOB HISTORY ──────────────────────────────────────────────────────
         elif message == "JOB HISTORY":
             labourer = get_from_db("labourers", phone)
-            if not labourer: return t("labourers_only", phone)
-            history  = get_job_history_for_labourer(phone)
-            if not history: return t("job_history_empty", phone)
+            if not labourer:
+                return "❌ Only registered labourers can view job history."
+            history = get_job_history_for_labourer(phone)
+            if not history:
+                return "No past jobs yet.\nReply VIEW JOBS to find work."
             ongoing   = [j for j in history if j["status"] == "confirmed"]
             completed = [j for j in history if j["status"] == "completed"]
             cancelled = [j for j in history if j["status"] == "cancelled"]
-            def _fmt(job, icon):
-                f_rec  = get_from_db("farmers", job.get("farmer_phone")) if job.get("farmer_phone") else None
-                fname  = f_rec["name"] if f_rec else t("unknown_name", phone)
-                return (f"{icon} Job #{job['id']} — {job['work_type']}\n"
-                        f"   📍 {job['location']} | 📅 {job['start_date']}\n"
-                        f"   {t('job_history_farmer_label', phone, f_name=fname, wage=job['wage'])}\n"
-                        f"   Status: {job['status'].upper()}\n\n")
-            msg = t("job_history_header", phone)
-            if ongoing:   msg += t("job_history_ongoing",   phone) + "".join(_fmt(j,"🕓") for j in ongoing)
-            if completed: msg += t("job_history_completed", phone) + "".join(_fmt(j,"✅") for j in completed)
-            if cancelled: msg += t("job_history_cancelled", phone) + "".join(_fmt(j,"❌") for j in cancelled)
-            msg += t("job_history_footer", phone)
+            def _format_job(job, icon):
+                farmer_phone = job.get("farmer_phone")
+                farmer = get_from_db("farmers", farmer_phone) if farmer_phone else None
+                farmer_name = farmer["name"] if farmer else "Unknown"
+                return (
+                    f"{icon} Job #{job['id']} — {job['work_type']}\n"
+                    f"   📍 {job['location']} | 📅 {job['start_date']}\n"
+                    f"   👨‍🌾 Farmer: {farmer_name} | ₹{job['wage']}/day\n"
+                    f"   Status: {job['status'].upper()}\n\n"
+                )
+            msg = "📜 *Your Job History:*\n\n"
+            if ongoing:
+                msg += "🕓 *Ongoing:*\n\n"
+                for job in ongoing:
+                    msg += _format_job(job, "🕓")
+            if completed:
+                msg += "✅ *Completed:*\n\n"
+                for job in completed:
+                    msg += _format_job(job, "✅")
+            if cancelled:
+                msg += "❌ *Cancelled:*\n\n"
+                for job in cancelled:
+                    msg += _format_job(job, "❌")
+            msg += "Reply VIEW JOBS to find more work."
             return msg
 
-        # TODAY
+        # ── TODAY ─────────────────────────────────────────────────────────────
         elif message == "TODAY":
             farmer = get_from_db("farmers", phone)
             if farmer:
                 pending_confirm = get_confirmed_jobs_for_farmer(phone)
                 pending_rate    = [j for j in get_completed_jobs_for_farmer(phone) if not j.get("rated")]
                 deadlines       = schemes_deadline_within(7)
-                msg = t("today_header_farmer", phone, name=farmer["name"], date=date.today().strftime("%d %B %Y"))
+                msg = f"📅 *Today for {farmer['name']}* — {date.today().strftime('%d %B %Y')}\n\n"
                 if pending_confirm:
-                    msg += t("today_in_progress", phone, count=len(pending_confirm))
+                    msg += f"🕓 *{len(pending_confirm)} job(s) in progress:*\n"
                     for job in pending_confirm[:3]:
                         msg += f"   • #{job['id']} {job['work_type']} — JOB DONE {job['id']} once finished\n"
                     msg += "\n"
                 if pending_rate:
-                    msg += t("today_pending_rate", phone, count=len(pending_rate))
+                    msg += f"⭐ *{len(pending_rate)} job(s) waiting for your rating:*\n"
                     for job in pending_rate[:3]:
                         msg += f"   • RATE {job['id']} [1-5]\n"
                     msg += "\n"
                 if deadlines:
-                    msg += t("today_subsidy_deadlines", phone)
+                    msg += "🏛️ *Subsidy deadlines this week:*\n"
                     for s in deadlines:
                         msg += f"   • {s['name']} — {days_until(s['end_date'])}\n"
                     msg += "\n"
                 if not pending_confirm and not pending_rate and not deadlines:
-                    msg += t("today_nothing_farmer", phone)
+                    msg += "✅ Nothing urgent today. Reply POST JOB to find labourers.\n"
                 return msg.strip()
             labourer = get_from_db("labourers", phone)
             if labourer:
@@ -2240,373 +1810,511 @@ def handle_message(phone: str, raw_body: str) -> str:
                 pending_confirm = get_confirmed_jobs_for_labourer(phone)
                 pending_rate    = [j for j in get_completed_jobs_for_labourer(phone) if not j.get("labourer_rated")]
                 deadlines       = schemes_deadline_within(7)
-                msg = t("today_header_labourer", phone, name=labourer["name"], date=date.today().strftime("%d %B %Y"))
+                msg = f"📅 *Today for {labourer['name']}* — {date.today().strftime('%d %B %Y')}\n\n"
                 if open_jobs:
-                    msg += t("today_open_jobs", phone, count=len(open_jobs), location=labourer["location"])
+                    msg += f"🔍 *{len(open_jobs)} open job(s) near {labourer['location']}:*\n"
                     for job in open_jobs[:3]:
                         msg += f"   • #{job['id']} {job['work_type']} — ₹{job['wage']}/day — CONFIRM {job['id']}\n"
                     msg += "\n"
                 if pending_confirm:
-                    msg += t("today_accepted_jobs", phone, count=len(pending_confirm))
+                    msg += f"🕓 *{len(pending_confirm)} job(s) you've accepted, awaiting JOB DONE from farmer:*\n"
                     for job in pending_confirm[:3]:
                         msg += f"   • #{job['id']} {job['work_type']} on {job['start_date']}\n"
                     msg += "\n"
                 if pending_rate:
-                    msg += t("today_pending_rate", phone, count=len(pending_rate))
+                    msg += f"⭐ *{len(pending_rate)} job(s) waiting for your rating:*\n"
                     for job in pending_rate[:3]:
                         msg += f"   • RATE {job['id']} [1-5]\n"
                     msg += "\n"
                 if deadlines:
-                    msg += t("today_subsidy_deadlines", phone)
+                    msg += "🏛️ *Subsidy deadlines this week:*\n"
                     for s in deadlines:
                         msg += f"   • {s['name']} — {days_until(s['end_date'])}\n"
                     msg += "\n"
                 if not open_jobs and not pending_confirm and not pending_rate and not deadlines:
-                    msg += t("today_nothing_labourer", phone)
+                    msg += "😔 Nothing nearby right now. We'll notify you when a job is posted.\n"
                 return msg.strip()
             return t("register_first", phone)
 
-        # MY DAYS
+        # ── MY DAYS ───────────────────────────────────────────────────────────
         elif message == "MY DAYS":
             labourer = get_from_db("labourers", phone)
-            if not labourer: return t("labourers_only", phone)
+            if not labourer:
+                return "❌ Only registered labourers can check their day count."
             fy_start, fy_end = current_financial_year_bounds()
             days_done = count_completed_days_in_range(phone, fy_start, fy_end)
             days_left = max(0, 100 - days_done)
             bar_filled = min(20, round((days_done / 100) * 20))
             bar = "🟩" * bar_filled + "⬜" * (20 - bar_filled)
-            return t("my_days_result", phone,
-                     fy_start=fy_start.strftime("%b %Y"), fy_end=fy_end.strftime("%b %Y"),
-                     bar=bar, days_done=days_done, days_left=days_left)
+            return (
+                f"📊 *MGNREGA-style Day Tracker*\n"
+                f"({fy_start.strftime('%b %Y')} – {fy_end.strftime('%b %Y')})\n\n"
+                f"{bar}\n"
+                f"✅ Days completed via Farm Connect: {days_done}\n"
+                f"🎯 Remaining toward 100-day entitlement: {days_left}\n\n"
+                f"ℹ️ This counts your *completed Farm Connect jobs* this financial year as a rough "
+                f"guide — it does not include MGNREGA work done outside the app. Your official "
+                f"day count is on your Job Card at the Gram Panchayat.\n\n"
+                f"Reply SUBSIDY for the MGNREGA scheme number to see full details."
+            )
 
-        # JOB DONE
+        # ── JOB DONE ──────────────────────────────────────────────────────────
         elif message.startswith("JOB DONE"):
             parts = raw_body.split()
             if len(parts) < 3 or not parts[2].isdigit():
-                return t("bad_format_id", phone, fmt="JOB DONE [job_id]", ex="JOB DONE 12")
+                return "❓ Couldn't read that.\n\nFormat: JOB DONE [job_id]\nExample: JOB DONE 12"
             job_id = parts[2]
             farmer = get_from_db("farmers", phone)
-            if not farmer: return t("job_done_not_farmer", phone)
-            updated = update_db("jobs",
-                                {"id": job_id, "farmer_phone": phone, "status": "confirmed"},
-                                {"status": "completed"})
-            if not updated: return t("job_done_not_found", phone)
-            job            = updated[0]
+            if not farmer:
+                return "❌ Only the farmer who posted the job can mark it as done."
+            updated = update_db(
+                "jobs",
+                {"id": job_id, "farmer_phone": phone, "status": "confirmed"},
+                {"status": "completed"}
+            )
+            if not updated:
+                return "❌ Job not found, not yours, or not in an accepted state."
+            job = updated[0]
             labourer_phone = job.get("labourer_phone")
-            labourer       = get_from_db("labourers", labourer_phone) if labourer_phone else None
-            labourer_name  = labourer["name"] if labourer else t("unknown_name", phone)
+            labourer = get_from_db("labourers", labourer_phone) if labourer_phone else None
+            labourer_name = labourer["name"] if labourer else "the labourer"
             if labourer_phone:
-                send_whatsapp(labourer_phone,
-                              t("job_done_labourer_whatsapp", labourer_phone,
-                                work_type=job["work_type"], location=job["location"],
-                                start_date=job["start_date"], job_id=job["id"]))
-            return t("job_done_success", phone,
-                     job_id=job["id"], work_type=job["work_type"], labourer_name=labourer_name)
+                send_whatsapp(
+                    labourer_phone,
+                    f"✅ *Job Marked as Completed!*\n\n"
+                    f"🔨 Work: {job['work_type']}\n"
+                    f"📍 Location: {job['location']}\n"
+                    f"📅 Date: {job['start_date']}\n\n"
+                    f"The farmer has confirmed this job is done. 🎉\n\n"
+                    f"Please rate the farmer:\n"
+                    f"Reply RATE {job['id']} [1-5]\nExample: RATE {job['id']} 5"
+                )
+            return (
+                f"✅ *Job #{job['id']} marked as completed!*\n\n"
+                f"🔨 Work: {job['work_type']}\n"
+                f"👤 Labourer: {labourer_name}\n\n"
+                f"Please rate the labourer:\n"
+                f"Reply RATE {job['id']} [1-5]\nExample: RATE {job['id']} 5"
+            )
 
-        # RATE
+        # ── RATE ──────────────────────────────────────────────────────────────
         elif message.startswith("RATE"):
             parts = raw_body.split()
             if len(parts) != 3 or not parts[1].isdigit() or not parts[2].isdigit():
-                return t("rate_invalid_format", phone)
+                return "❓ Couldn't read that.\n\nFormat: RATE [job_id] [stars 1–5]\nExample: RATE 12 5"
             job_id, stars = parts[1], int(parts[2])
             if stars < 1 or stars > 5:
-                return t("rate_stars_range", phone)
-            farmer   = get_from_db("farmers",   phone)
-            labourer = get_from_db("labourers",  phone)
-            if not farmer and not labourer: return t("register_first", phone)
+                return "Stars must be between 1 and 5."
+            farmer   = get_from_db("farmers", phone)
+            labourer = get_from_db("labourers", phone)
+            if not farmer and not labourer:
+                return t("register_first", phone)
             try:
-                res  = req.get(f"{SUPABASE_URL}/rest/v1/jobs?id=eq.{job_id}", headers=HEADERS, timeout=10)
+                url = f"{SUPABASE_URL}/rest/v1/jobs?id=eq.{job_id}"
+                res = req.get(url, headers=HEADERS, timeout=10)
                 jobs = res.json()
             except Exception:
-                return t("db_fetch_error", phone)
-            if not jobs: return t("job_not_found", phone)
+                return "❌ Could not fetch job. Try again."
+            if not jobs:
+                return "❌ Job not found."
             job = jobs[0]
-            if job["status"] != "completed": return t("rate_job_not_completed", phone)
-            star_display = "⭐" * stars
-
+            if job["status"] != "completed":
+                return "❌ You can only rate jobs after the farmer marks them as JOB DONE."
             if farmer and job.get("farmer_phone") == phone:
-                if job.get("rated"):     return t("rate_already_rated", phone)
-                lp = job.get("labourer_phone")
-                if not lp:               return t("rate_no_labourer", phone)
-                target = get_from_db("labourers", lp)
-                if not target:           return t("rate_person_not_found", phone, role="Labourer")
-                old_t = target.get("total_ratings", 0); old_r = target.get("rating", 0)
-                new_t = old_t + 1; new_r = round(((old_r * old_t) + stars) / new_t, 1)
-                update_db("labourers", {"phone": lp},     {"rating": new_r, "total_ratings": new_t})
-                update_db("jobs",      {"id": job_id},    {"rated": True})
-                return t("rate_success", phone, name=target["name"], stars=star_display, new_rating=new_r, total=new_t)
-
+                if job.get("rated"):
+                    return "You've already rated this job."
+                labourer_phone = job.get("labourer_phone")
+                if not labourer_phone:
+                    return "❌ No labourer assigned to this job."
+                target = get_from_db("labourers", labourer_phone)
+                if not target:
+                    return "❌ Labourer not found."
+                old_total  = target.get("total_ratings", 0)
+                old_rating = target.get("rating", 0)
+                new_total  = old_total + 1
+                new_rating = round(((old_rating * old_total) + stars) / new_total, 1)
+                update_db("labourers", {"phone": labourer_phone}, {"rating": new_rating, "total_ratings": new_total})
+                update_db("jobs", {"id": job_id}, {"rated": True})
+                star_display = "⭐" * stars
+                return (
+                    f"✅ Rated {target['name']} — {star_display}\n"
+                    f"Their new rating: {new_rating}⭐ ({new_total} total ratings)"
+                )
             elif labourer and job.get("labourer_phone") == phone:
-                if job.get("labourer_rated"): return t("rate_already_rated", phone)
-                fp = job.get("farmer_phone")
-                if not fp:               return t("rate_no_farmer", phone)
-                target = get_from_db("farmers", fp)
-                if not target:           return t("rate_person_not_found", phone, role="Farmer")
-                old_t = target.get("total_ratings", 0); old_r = target.get("rating", 0)
-                new_t = old_t + 1; new_r = round(((old_r * old_t) + stars) / new_t, 1)
-                update_db("farmers", {"phone": fp},        {"rating": new_r, "total_ratings": new_t})
-                update_db("jobs",    {"id": job_id},       {"labourer_rated": True})
-                return t("rate_success", phone, name=target["name"], stars=star_display, new_rating=new_r, total=new_t)
+                if job.get("labourer_rated"):
+                    return "You've already rated this job."
+                farmer_phone = job.get("farmer_phone")
+                if not farmer_phone:
+                    return "❌ No farmer found for this job."
+                target = get_from_db("farmers", farmer_phone)
+                if not target:
+                    return "❌ Farmer not found."
+                old_total  = target.get("total_ratings", 0)
+                old_rating = target.get("rating", 0)
+                new_total  = old_total + 1
+                new_rating = round(((old_rating * old_total) + stars) / new_total, 1)
+                update_db("farmers", {"phone": farmer_phone}, {"rating": new_rating, "total_ratings": new_total})
+                update_db("jobs", {"id": job_id}, {"labourer_rated": True})
+                star_display = "⭐" * stars
+                return (
+                    f"✅ Rated {target['name']} — {star_display}\n"
+                    f"Their new rating: {new_rating}⭐ ({new_total} total ratings)"
+                )
             else:
-                return t("rate_not_your_job", phone)
+                return "❌ Job not found or doesn't belong to you."
 
-        # MY JOBS
+        # ── MY JOBS ───────────────────────────────────────────────────────────
         elif message == "MY JOBS":
             farmer = get_from_db("farmers", phone)
-            if not farmer: return t("farmers_only", phone)
+            if not farmer:
+                return "❌ Only farmers can view their jobs."
             jobs = get_jobs_by_phone(phone)
-            if not jobs: return t("my_jobs_empty", phone)
-            status_key = {"open":"status_open","confirmed":"status_confirmed",
-                          "completed":"status_completed","cancelled":"status_cancelled"}
-            status_icon = {"open":"🟢","confirmed":"🕓","completed":"✅","cancelled":"❌"}
-            msg = t("my_jobs_header", phone)
+            if not jobs:
+                return "You haven't posted any jobs yet.\nReply POST JOB to post one."
+            msg = "📋 *Your Recent Jobs:*\n\n"
+            status_icon = {"open": "🟢", "confirmed": "🕓", "completed": "✅", "cancelled": "❌"}
             for i, job in enumerate(jobs):
-                skey = status_key.get(job["status"], "status_open")
                 icon = status_icon.get(job["status"], "⚪")
-                msg += (f"{i+1}. {job['work_type']} — {job['location']}\n"
-                        f"   👥 {job['num_labourers']} labourers | ₹{job['wage']}/day\n"
-                        f"   📅 {job['start_date']} | {icon} {t(skey, phone)}\n"
-                        f"   ID: {job['id']}\n\n")
-            msg += t("my_jobs_footer", phone)
+                msg += (
+                    f"{i+1}. {job['work_type']} — {job['location']}\n"
+                    f"   👥 {job['num_labourers']} labourers | ₹{job['wage']}/day\n"
+                    f"   📅 {job['start_date']} | {icon} {job['status'].upper()}\n"
+                    f"   ID: {job['id']}\n\n"
+                )
+            msg += "Reply CANCEL [ID] to cancel a job, or JOB DONE [ID] once work is complete."
             return msg
 
-        # VIEW JOBS
+        # ── VIEW JOBS ─────────────────────────────────────────────────────────
         elif message == "VIEW JOBS":
             labourer = get_from_db("labourers", phone)
-            if not labourer: return t("labourers_only", phone)
-            jobs          = get_open_jobs_by_location(labourer["location"])
-            rating        = labourer.get("rating")
+            if not labourer:
+                return "❌ Only registered labourers can view jobs."
+            jobs = get_open_jobs_by_location(labourer["location"])
+            rating = labourer.get("rating")
             total_ratings = labourer.get("total_ratings", 0)
-            s             = "s" if total_ratings != 1 else ""
-            rating_line   = (t("rating_line",   phone, rating=rating, count=total_ratings, s=s)
-                             if rating and total_ratings else t("no_rating_yet", phone))
+            rating_line = (
+                f"⭐ Your rating: {rating}⭐ ({total_ratings} rating{'s' if total_ratings != 1 else ''})\n\n"
+                if rating and total_ratings else
+                "⭐ Your rating: No ratings yet\n\n"
+            )
             if not jobs:
-                return rating_line + t("no_jobs_nearby", phone, location=labourer["location"])
-            msg = t("view_jobs_header", phone, location=labourer["location"], rating_line=rating_line)
+                return f"{rating_line}" + t("no_jobs_nearby", phone, location=labourer["location"])
+            msg = f"🔍 *Open Jobs Near {labourer['location']}:*\n\n{rating_line}"
             for i, job in enumerate(jobs):
-                msg += t("view_jobs_item", phone,
-                         i=i+1, work_type=job["work_type"], location=job["location"],
-                         num_labourers=job["num_labourers"], wage=job["wage"],
-                         start_date=job["start_date"], job_id=job["id"])
+                msg += (
+                    f"{i+1}. 🔨 {job['work_type']}\n"
+                    f"   📍 Location: {job['location']}\n"
+                    f"   👥 {job['num_labourers']} needed | ₹{job['wage']}/day\n"
+                    f"   📅 {job['start_date']}\n"
+                    f"   ➡️ Reply CONFIRM {job['id']} to accept\n\n"
+                )
             return msg
 
-        # CONFIRM
+        # ── CONFIRM ───────────────────────────────────────────────────────────
         elif message.startswith("CONFIRM"):
             parts = raw_body.split()
             if len(parts) < 2 or not parts[1].isdigit():
-                return t("bad_format_id", phone, fmt="CONFIRM [job_id]", ex="CONFIRM 3")
+                return "❓ Couldn't read that.\n\nFormat: CONFIRM [job_id]\nExample: CONFIRM 3"
             job_id   = parts[1]
             labourer = get_from_db("labourers", phone)
-            if not labourer: return t("confirm_not_labourer", phone)
+            if not labourer:
+                return "❌ Only registered labourers can confirm jobs."
             try:
-                res    = req.get(f"{SUPABASE_URL}/rest/v1/jobs?id=eq.{job_id}", headers=HEADERS, timeout=10)
+                url = f"{SUPABASE_URL}/rest/v1/jobs?id=eq.{job_id}"
+                res = req.get(url, headers=HEADERS, timeout=10)
                 lookup = res.json()
             except Exception:
-                return t("db_fetch_error", phone)
-            if not lookup:                              return t("confirm_already_taken", phone)
-            if lookup[0].get("farmer_phone") == phone: return t("confirm_own_job", phone)
-            updated = update_db("jobs", {"id": job_id, "status": "open"},
-                                {"status": "confirmed", "labourer_phone": phone})
-            if not updated: return t("confirm_already_taken", phone)
+                return "❌ Could not fetch job. Try again."
+            if not lookup:
+                return "❌ Job not found or already confirmed."
+            if lookup[0].get("farmer_phone") == phone:
+                return "❌ You can't confirm your own posted job."
+            updated = update_db(
+                "jobs",
+                {"id": job_id, "status": "open"},
+                {"status": "confirmed", "labourer_phone": phone}
+            )
+            if not updated:
+                return "❌ Job not found or already confirmed."
             job = updated[0]
-            farmer_phone = job["farmer_phone"]
-            send_whatsapp(farmer_phone,
-                          t("confirm_farmer_whatsapp", farmer_phone,
-                            labourer_name=labourer["name"],
-                            skill=labourer.get("skill", "General"),
-                            work_type=job["work_type"], location=job["location"],
-                            start_date=job["start_date"], job_id=job["id"]))
+            send_whatsapp(
+                job["farmer_phone"],
+                f"✅ *Job Confirmed!*\n\n"
+                f"👤 Labourer: {labourer['name']}\n"
+                f"🛠️ Skill: {labourer.get('skill', 'General')}\n"
+                f"🔨 Work: {job['work_type']}\n"
+                f"📍 Location: {job['location']}\n"
+                f"📅 Date: {job['start_date']}\n\n"
+                f"Your labourer will arrive on the job date. 🌾\n"
+                f"Once the work is finished, reply JOB DONE {job['id']} to close it out and unlock ratings."
+            )
             return t("job_confirmed_labourer", phone,
-                     work_type=job["work_type"], location=job["location"],
-                     start_date=job["start_date"], wage=job["wage"])
+                     work_type=job["work_type"],
+                     location=job["location"],
+                     start_date=job["start_date"],
+                     wage=job["wage"])
 
-        # NO SHOW
+        # ── NO SHOW ───────────────────────────────────────────────────────────
         elif message.startswith("NO SHOW"):
             parts = raw_body.split()
             if len(parts) < 3 or not parts[2].isdigit():
-                return t("bad_format_id", phone, fmt="NO SHOW [job_id]", ex="NO SHOW 12")
+                return "❓ Couldn't read that.\n\nFormat: NO SHOW [job_id]\nExample: NO SHOW 12"
             job_id = parts[2]
             farmer = get_from_db("farmers", phone)
-            if not farmer: return t("no_show_not_farmer", phone)
-            updated = update_db("jobs",
-                                {"id": job_id, "farmer_phone": phone, "status": "confirmed"},
-                                {"status": "cancelled"})
-            if not updated: return t("no_show_not_found", phone)
-            job            = updated[0]
+            if not farmer:
+                return "❌ Only the farmer who posted the job can report a no-show."
+            updated = update_db(
+                "jobs",
+                {"id": job_id, "farmer_phone": phone, "status": "confirmed"},
+                {"status": "cancelled"}
+            )
+            if not updated:
+                return "❌ Job not found, not yours, or not in an accepted (confirmed) state."
+            job = updated[0]
             labourer_phone = job.get("labourer_phone")
             if not labourer_phone:
-                return t("no_show_no_labourer", phone, job_id=job_id)
+                return f"✅ Job #{job_id} marked cancelled, but no labourer was on record to flag."
             increment_no_show(labourer_phone)
-            labourer      = get_from_db("labourers", labourer_phone)
-            labourer_name = labourer["name"] if labourer else t("unknown_name", phone)
-            send_whatsapp(labourer_phone,
-                          t("no_show_penalty_whatsapp", labourer_phone,
-                            job_id=job_id, work_type=job["work_type"],
-                            amount=PENALTY_AMOUNT, drop=RATING_PENALTY))
-            return t("no_show_success", phone,
-                     job_id=job_id, labourer_name=labourer_name,
-                     amount=PENALTY_AMOUNT, rating_drop=RATING_PENALTY)
+            labourer = get_from_db("labourers", labourer_phone)
+            labourer_name = labourer["name"] if labourer else "the labourer"
+            send_whatsapp(
+                labourer_phone,
+                f"⚠️ *No-Show Reported*\n\n"
+                f"The farmer for Job #{job_id} ({job['work_type']}) has reported that you "
+                f"did not show up.\n\n"
+                f"📉 A ₹{PENALTY_AMOUNT} penalty has been added to your account and your "
+                f"rating has been reduced by {RATING_PENALTY}⭐.\n\n"
+                f"If you believe this was reported in error, please contact support.\n"
+                f"Reply VIEW JOBS to find more work."
+            )
+            return (
+                f"✅ Reported. Job #{job_id} has been cancelled and {labourer_name} "
+                f"has been flagged for not showing up.\n\n"
+                f"📉 A ₹{PENALTY_AMOUNT} penalty and a {RATING_PENALTY}⭐ rating drop have "
+                f"been applied to their account.\n\n"
+                f"Reply POST JOB to re-post this work."
+            )
 
-        # CANCEL JOB
+        # ── CANCEL JOB ────────────────────────────────────────────────────────
         elif message.startswith("CANCEL") and not message.startswith("CANCEL EQUIPMENT"):
             parts = raw_body.split()
             if len(parts) < 2 or not parts[1].isdigit():
-                return t("bad_format_id", phone, fmt="CANCEL [job_id]", ex="CANCEL 7")
+                return "❓ Couldn't read that.\n\nFormat: CANCEL [job_id]\nExample: CANCEL 7"
             job_id  = parts[1]
-            updated = update_db("jobs", {"id": job_id, "farmer_phone": phone}, {"status": "cancelled"})
-            if not updated: return t("job_not_found", phone)
+            updated = update_db(
+                "jobs",
+                {"id": job_id, "farmer_phone": phone},
+                {"status": "cancelled"}
+            )
+            if not updated:
+                return "❌ Job not found or you don't own this job."
             job = updated[0]
             labourer_phone = job.get("labourer_phone")
-            penalty_line   = ""
+            penalty_line = ""
             if labourer_phone:
                 apply_penalty("farmers", phone, "cancel_confirmed_job")
-                penalty_line = t("cancel_penalty_line", phone,
-                                 amount=PENALTY_AMOUNT, rating_drop=RATING_PENALTY)
-                send_whatsapp(labourer_phone,
-                              t("cancel_labourer_whatsapp", labourer_phone,
-                                work_type=job["work_type"], location=job["location"],
-                                start_date=job["start_date"]))
-            return t("cancel_success", phone, job_id=job_id) + penalty_line
+                penalty_line = (
+                    f"\n📉 Since a labourer had already accepted this job, a ₹{PENALTY_AMOUNT} "
+                    f"penalty and a {RATING_PENALTY}⭐ rating drop have been applied to your account."
+                )
+                send_whatsapp(
+                    labourer_phone,
+                    f"⚠️ *Job Cancelled*\n\n"
+                    f"🔨 Work: {job['work_type']}\n"
+                    f"📍 Location: {job['location']}\n"
+                    f"📅 Date: {job['start_date']}\n\n"
+                    f"This job has been cancelled by the farmer after you had already accepted it. "
+                    f"Sorry for the inconvenience — the farmer has been penalized for this cancellation."
+                )
+            return f"✅ Job #{job_id} has been cancelled.{penalty_line}"
 
-        # RENT EQUIPMENT
+        # ── RENT EQUIPMENT ────────────────────────────────────────────────────
         elif message == "RENT EQUIPMENT":
             farmer = get_from_db("farmers", phone)
-            if not farmer: return t("farmers_only", phone)
-            sessions[phone]["step"]  = "equip_name"
+            if not farmer:
+                return "❌ Only registered farmers can list equipment."
+            sessions[phone]["step"] = "equip_name"
             sessions[phone]["equip"] = {}
-            return t("rent_equipment_start", phone)
+            return (
+                "🚜 *Let's list your equipment!*\n\n"
+                "What equipment do you want to rent out?\n"
+                "(e.g. Tractor, Rotavator, Sprayer, Thresher)"
+            )
 
-        # VIEW EQUIPMENT
+        # ── VIEW EQUIPMENT ────────────────────────────────────────────────────
         elif message == "VIEW EQUIPMENT":
             user = get_from_db("farmers", phone) or get_from_db("labourers", phone)
-            if not user: return t("register_first", phone)
+            if not user:
+                return t("register_first", phone)
             location = user.get("location", "")
-            items    = get_equipment_by_location(location)
+            items = get_equipment_by_location(location)
             if not items:
-                return t("view_equipment_empty", phone, location=location)
-            msg = t("view_equipment_header", phone, location=location)
+                return (
+                    f"No equipment available for rent in {location} right now. 😔\n"
+                    f"Check back later!"
+                )
+            msg = f"🚜 *Equipment Available in {location}:*\n\n"
             for i, item in enumerate(items):
-                until = item.get("available_until") or t("ongoing_label_short", phone)
-                msg += t("view_equipment_item", phone,
-                         i=i+1, name=item["name"], rent=item["rent_per_day"],
-                         until=until, eq_id=item["id"])
+                msg += (
+                    f"{i+1}. 🔧 {item['name']}\n"
+                    f"   💰 ₹{item['rent_per_day']}/day\n"
+                    f"   📅 Until: {item.get('available_until') or 'Ongoing'}\n"
+                    f"   ➡️ Reply BOOK EQUIPMENT {item['id']} to book\n\n"
+                )
             return msg
 
-        # BOOK EQUIPMENT
+        # ── BOOK EQUIPMENT ────────────────────────────────────────────────────
         elif message.startswith("BOOK EQUIPMENT"):
             parts = raw_body.split()
             if len(parts) < 3 or not parts[2].isdigit():
-                return t("bad_format_id", phone, fmt="BOOK EQUIPMENT [id]", ex="BOOK EQUIPMENT 3")
+                return "❓ Couldn't read that.\n\nFormat: BOOK EQUIPMENT [id]\nExample: BOOK EQUIPMENT 3"
             equipment_id = parts[2]
             user = get_from_db("farmers", phone) or get_from_db("labourers", phone)
-            if not user: return t("register_first", phone)
+            if not user:
+                return t("register_first", phone)
             item = get_equipment_by_id(equipment_id)
-            if not item:              return t("job_not_found", phone)
+            if not item:
+                return "❌ Equipment not found."
             if not item.get("available"):
-                return t("book_equipment_unavailable", phone, name=item["name"])
+                return f"❌ Sorry, {item['name']} is no longer available for rent."
             if item.get("owner_phone") == phone:
-                return t("book_own_equipment", phone)
-            updated = update_db("equipment", {"id": equipment_id},
-                                {"available": False, "booked_by": phone})
-            if not updated: return t("book_equipment_error", phone)
-            owner_phone = item["owner_phone"]
-            send_whatsapp(owner_phone,
-                          t("equip_booking_owner_whatsapp", owner_phone,
-                            name=item["name"], user_name=user["name"],
-                            phone=phone, rent=item["rent_per_day"]))
-            until = item.get("available_until") or t("ongoing_label_short", phone)
-            return t("book_equipment_success", phone,
-                     name=item["name"], rent=item["rent_per_day"], until=until)
+                return "❌ You can't book your own equipment."
+            updated = update_db(
+                "equipment",
+                {"id": equipment_id},
+                {"available": False, "booked_by": phone}
+            )
+            if not updated:
+                return "❌ Could not complete booking. Please try again."
+            send_whatsapp(
+                item["owner_phone"],
+                f"🔔 *Equipment Booking Confirmed!*\n\n"
+                f"🚜 Equipment: {item['name']}\n"
+                f"👤 Booked by: {user['name']}\n"
+                f"📞 Contact: {phone}\n"
+                f"💰 Rent: ₹{item['rent_per_day']}/day\n\n"
+                f"Please coordinate with them for pickup/delivery."
+            )
+            return (
+                f"✅ *Equipment Booked!*\n\n"
+                f"🚜 Equipment: {item['name']}\n"
+                f"💰 Rent: ₹{item['rent_per_day']}/day\n"
+                f"📅 Available until: {item.get('available_until') or 'Ongoing'}\n\n"
+                f"The owner has been notified. They will contact you shortly! 📞"
+            )
 
-        # MY EQUIPMENT
+        # ── MY EQUIPMENT ──────────────────────────────────────────────────────
         elif message == "MY EQUIPMENT":
             farmer = get_from_db("farmers", phone)
-            if not farmer: return t("farmers_only", phone)
+            if not farmer:
+                return "❌ Only farmers can manage equipment listings."
             items = get_equipment_by_owner(phone)
-            if not items: return t("my_equipment_empty", phone)
-            msg = t("my_equipment_header", phone)
+            if not items:
+                return "You haven't listed any equipment yet.\nReply RENT EQUIPMENT to add one."
+            msg = "🚜 *Your Equipment Listings:*\n\n"
             for i, item in enumerate(items):
-                status = (t("equip_status_available", phone) if item.get("available")
-                          else t("equip_status_booked", phone))
-                until  = item.get("available_until") or t("ongoing_label_short", phone)
-                msg   += (f"{i+1}. 🔧 {item['name']}\n"
-                          f"   💰 ₹{item['rent_per_day']}/day | {status}\n"
-                          f"   📅 Until: {until}\n   ID: {item['id']}\n\n")
-            msg += t("my_equipment_footer", phone)
+                status = "✅ Available" if item.get("available") else "🔒 Booked"
+                msg += (
+                    f"{i+1}. 🔧 {item['name']}\n"
+                    f"   💰 ₹{item['rent_per_day']}/day | {status}\n"
+                    f"   📅 Until: {item.get('available_until') or 'Ongoing'}\n"
+                    f"   ID: {item['id']}\n\n"
+                )
+            msg += "Reply CANCEL EQUIPMENT [id] to remove a listing."
             return msg
 
-        # CANCEL EQUIPMENT
+        # ── CANCEL EQUIPMENT ──────────────────────────────────────────────────
         elif message.startswith("CANCEL EQUIPMENT"):
             parts = raw_body.split()
             if len(parts) < 3 or not parts[2].isdigit():
-                return t("bad_format_id", phone, fmt="CANCEL EQUIPMENT [id]", ex="CANCEL EQUIPMENT 3")
+                return "❓ Couldn't read that.\n\nFormat: CANCEL EQUIPMENT [id]\nExample: CANCEL EQUIPMENT 3"
             equipment_id = parts[2]
             item = get_equipment_by_id(equipment_id)
-            if not item: return t("job_not_found", phone)
+            if not item:
+                return "❌ Equipment not found."
             if item.get("owner_phone") != phone:
-                return t("cancel_equipment_not_yours", phone)
-            updated = update_db("equipment", {"id": equipment_id}, {"available": False})
-            if not updated: return t("cancel_equipment_error", phone)
+                return "❌ You can only cancel your own equipment listings."
+            updated = update_db(
+                "equipment",
+                {"id": equipment_id},
+                {"available": False}
+            )
+            if not updated:
+                return "❌ Could not cancel listing. Please try again."
             booked_by = item.get("booked_by")
             if booked_by:
-                send_whatsapp(booked_by,
-                              t("equip_cancel_booker_whatsapp", booked_by,
-                                name=item["name"], location=item["location"]))
-            return t("cancel_equipment_success", phone, eq_id=equipment_id, name=item["name"])
+                send_whatsapp(
+                    booked_by,
+                    f"⚠️ *Equipment Booking Cancelled*\n\n"
+                    f"🚜 Equipment: {item['name']}\n"
+                    f"📍 Location: {item['location']}\n\n"
+                    f"The owner has cancelled this listing. Sorry for the inconvenience."
+                )
+            return f"✅ Equipment listing #{equipment_id} ({item['name']}) has been cancelled."
 
-        # SUBSIDIES
+        # ── SUBSIDIES ─────────────────────────────────────────────────────────
         elif message == "SUBSIDIES":
             schemes = active_schemes()
             expired = expired_schemes()
             if not schemes and not expired:
-                return t("subsidies_no_schemes", phone)
-            msg = (t("subsidies_header", phone) if schemes else t("subsidies_none", phone))
+                return "No government schemes are available right now. Check back later!"
+            msg = "🏛️ *Active Government Schemes:*\n\n"
             for i, scheme in enumerate(schemes):
-                msg += f"{i+1}. 📌 {scheme['name']}\n   {scheme['short']}\n   {expiry_tag(scheme)}\n\n"
+                tag = expiry_tag(scheme)
+                msg += f"{i+1}. 📌 {scheme['name']}\n   {scheme['short']}\n   {tag}\n\n"
+            if not schemes:
+                msg = "No schemes are currently open for application.\n\n"
             if expired:
-                msg += t("subsidies_expired_header", phone)
+                msg += "─────────────────────\n❌ *Recently Expired:*\n\n"
                 offset = len(schemes)
                 for i, scheme in enumerate(expired):
-                    msg += f"{offset+i+1}. 📌 {scheme['name']} — {t('subsidy_expired_label', phone)}\n"
+                    msg += f"{offset + i + 1}. 📌 {scheme['name']} — ❌ Expired\n"
                 msg += "\n"
-            msg += t("subsidies_footer", phone)
+            msg += "Reply SUBSIDY [number] for full details.\nExample: SUBSIDY 1"
             return msg
 
-        # SUBSIDY [n]
+        # ── SUBSIDY [n] ───────────────────────────────────────────────────────
         elif message.startswith("SUBSIDY"):
             parts = raw_body.split()
             if len(parts) < 2 or not parts[1].isdigit():
-                return t("bad_format_id", phone, fmt="SUBSIDY [number]", ex="SUBSIDY 2")
-            schemes  = active_schemes()
-            expired  = expired_schemes()
+                return "❓ Couldn't read that.\n\nFormat: SUBSIDY [number]\nExample: SUBSIDY 2"
+            schemes = active_schemes()
+            expired = expired_schemes()
             combined = schemes + expired
-            index    = int(parts[1]) - 1
+            index = int(parts[1]) - 1
             if index < 0 or index >= len(combined):
-                return t("subsidy_invalid_number", phone, count=len(combined))
-            scheme     = combined[index]
+                return f"❌ Invalid number. Reply SUBSIDIES to see the list (1–{len(combined)})."
+            scheme = combined[index]
             is_expired = index >= len(schemes)
             if is_expired:
-                return t("subsidy_detail_expired", phone,
-                         name=scheme["name"],
-                         end_date=scheme["end_date"].strftime("%d %B %Y"),
-                         next_cycle=next_cycle_estimate(scheme),
-                         eligibility=scheme["eligibility"], benefit=scheme["benefit"],
-                         how_to_apply=scheme["how_to_apply"], link=scheme["link"])
-            return t("subsidy_detail_active", phone,
-                     name=scheme["name"], tag=expiry_tag(scheme),
-                     deadline_line=renewal_or_deadline_line(scheme),
-                     eligibility=scheme["eligibility"], benefit=scheme["benefit"],
-                     how_to_apply=scheme["how_to_apply"], link=scheme["link"])
+                header = f"🏛️ *{scheme['name']}*\n❌ Expired (last cycle ended {scheme['end_date'].strftime('%d %B %Y')})\n\n{next_cycle_estimate(scheme)}\n"
+            else:
+                tag = expiry_tag(scheme)
+                deadline_line = renewal_or_deadline_line(scheme)
+                header = f"🏛️ *{scheme['name']}*\n{tag}\n{deadline_line}\n"
+            return (
+                f"{header}\n"
+                f"📋 *Eligibility:*\n{scheme['eligibility']}\n\n"
+                f"💰 *Benefit:*\n{scheme['benefit']}\n\n"
+                f"📝 *How to Apply:*\n{scheme['how_to_apply']}\n\n"
+                f"🔗 *Apply:* {scheme['link']}\n\n"
+                f"Reply SUBSIDIES to see the full list."
+            )
 
-        # Unknown command
+        # ── Unknown command ───────────────────────────────────────────────────
         else:
             suggestion, hint = fuzzy_suggestion(message)
             if suggestion:
-                return t("unknown_command", phone, suggestion=suggestion, hint=hint)
+                return (
+                    f"❓ Unknown command. Did you mean *{suggestion}*?\n\n"
+                    f"{hint}\n\nSend it exactly as shown to continue."
+                )
             farmer = get_from_db("farmers", phone)
-            if farmer:   return farmer_menu(farmer["name"], phone)
+            if farmer:
+                return farmer_menu(farmer["name"], phone)
             labourer = get_from_db("labourers", phone)
-            if labourer: return labourer_menu(labourer["name"], phone)
+            if labourer:
+                return labourer_menu(labourer["name"], phone)
             sessions[phone] = {"step": "start"}
             return t("welcome_new", phone)
 
@@ -2614,58 +2322,65 @@ def handle_message(phone: str, raw_body: str) -> str:
     elif step == "job_work_type":
         sessions[phone]["job"]["work_type"] = raw_body
         sessions[phone]["step"] = "job_num_labourers"
-        return t("ask_num_labourers", phone)
+        return "How many labourers do you need?"
 
     elif step == "job_num_labourers":
         if not raw_body.isdigit():
-            return t("ask_num_labourers_invalid", phone)
+            return "Please enter a number. How many labourers do you need?"
         sessions[phone]["job"]["num_labourers"] = int(raw_body)
         sessions[phone]["step"] = "job_wage"
-        farmer   = get_from_db("farmers", phone)
+        farmer = get_from_db("farmers", phone)
         location = farmer.get("location", "") if farmer else ""
         avg_wage = get_average_wage(sessions[phone]["job"]["work_type"], location) if location else None
         if avg_wage:
-            return t("ask_wage_with_avg", phone,
-                     work_type=sessions[phone]["job"]["work_type"],
-                     location=location, avg=avg_wage)
-        return t("ask_wage", phone)
+            return (
+                f"What is the wage per day? (in ₹)\n\n"
+                f"💡 Average for {sessions[phone]['job']['work_type']} near {location} "
+                f"is ₹{avg_wage}/day (based on completed jobs)."
+            )
+        return "What is the wage per day? (in ₹)"
 
     elif step == "job_wage":
         if not raw_body.replace(".", "", 1).isdigit():
-            return t("ask_wage_invalid", phone)
+            return "Please enter a valid amount (e.g. 600). What is the wage per day?"
         sessions[phone]["job"]["wage"] = raw_body
         sessions[phone]["step"] = "job_date"
-        farmer   = get_from_db("farmers", phone)
+        farmer = get_from_db("farmers", phone)
         location = farmer.get("location", "") if farmer else ""
         avg_wage = get_average_wage(sessions[phone]["job"]["work_type"], location) if location else None
-        date_prompt = t("ask_date", phone, example=example_future_date_str())
+        date_prompt = f"When do you need them? (e.g. {example_future_date_str()}, Tomorrow)"
         if avg_wage:
             entered = float(raw_body)
             if entered < avg_wage * 0.8:
-                return t("wage_below_avg", phone, avg=avg_wage, date_prompt=date_prompt)
+                return (
+                    f"⚠️ That's noticeably below the area average of ₹{avg_wage}/day for this work — "
+                    f"you may get fewer responses.\n\n{date_prompt}"
+                )
         return date_prompt
 
     elif step == "job_date":
         is_valid, normalized_date, err = validate_future_date(raw_body)
-        if not is_valid: return err
-        job    = sessions[phone]["job"]
+        if not is_valid:
+            return err
+        job = sessions[phone]["job"]
         job["start_date"] = normalized_date
         farmer = get_from_db("farmers", phone)
         if not farmer:
             sessions[phone]["step"] = "done"
-            return t("farmer_profile_not_found", phone)
+            return "❌ Could not find your farmer profile. Please try again."
         location = farmer.get("location", "Unknown")
         saved = save_to_db("jobs", {
-            "farmer_phone":  phone,
-            "work_type":     job["work_type"],
+            "farmer_phone": phone,
+            "work_type": job["work_type"],
             "num_labourers": job["num_labourers"],
-            "wage":          job["wage"],
-            "start_date":    job["start_date"],
-            "location":      location,
-            "status":        "open"
+            "wage": job["wage"],
+            "start_date": job["start_date"],
+            "location": location,
+            "status": "open"
         })
         sessions[phone]["step"] = "done"
-        if not saved: return t("job_post_error", phone)
+        if not saved:
+            return "⚠️ Error posting your job. Please try again by sending POST JOB."
         notify_nearby_labourers(saved)
         weather_line = ""
         parsed_date, _ = parse_job_date(raw_body)
@@ -2674,10 +2389,16 @@ def handle_message(phone: str, raw_body: str) -> str:
             if risk:
                 _, label = risk
                 weather_line = f"\n🌤️ Weather for {job['start_date']}: {label}\n"
-        return t("job_posted", phone,
-                 location=location, work_type=job["work_type"],
-                 num_labourers=job["num_labourers"], wage=job["wage"],
-                 start_date=job["start_date"], weather_line=weather_line)
+        return (
+            f"✅ *Job Posted Successfully!*\n\n"
+            f"📍 Location: {location}\n"
+            f"🔨 Work: {job['work_type']}\n"
+            f"👥 Labourers needed: {job['num_labourers']}\n"
+            f"💰 Wage: ₹{job['wage']}/day\n"
+            f"📅 Date: {job['start_date']}\n"
+            f"{weather_line}\n"
+            f"Notifying nearby labourers now! 🔔"
+        )
 
     # ── REHIRE FLOW ───────────────────────────────────────────────────────────
     elif step == "rehire_work_type":
@@ -2685,77 +2406,97 @@ def handle_message(phone: str, raw_body: str) -> str:
         if message not in ("SAME", "KEEP"):
             rehire["work_type"] = raw_body
         sessions[phone]["step"] = "rehire_num_labourers"
-        return t("rehire_ask_num", phone, count=rehire["num_labourers"])
+        return (
+            f"👥 Number of labourers (last time: *{rehire['num_labourers']}*)\n"
+            f"Reply a number, or SAME to keep it:"
+        )
 
     elif step == "rehire_num_labourers":
         rehire = sessions[phone]["rehire"]
         if message not in ("SAME", "KEEP"):
             if not raw_body.isdigit():
-                return t("rehire_num_invalid", phone)
+                return "Please enter a number, or reply SAME to keep the last value."
             rehire["num_labourers"] = int(raw_body)
         sessions[phone]["step"] = "rehire_wage"
-        return t("rehire_ask_wage", phone, wage=rehire["wage"])
+        return (
+            f"💰 Wage per day (last time: *₹{rehire['wage']}/day*)\n"
+            f"Reply a new amount, or SAME to keep it:"
+        )
 
     elif step == "rehire_wage":
         rehire = sessions[phone]["rehire"]
         if message not in ("SAME", "KEEP"):
             if not raw_body.replace(".", "", 1).isdigit():
-                return t("rehire_wage_invalid", phone)
+                return "Please enter a valid amount (e.g. 600), or reply SAME to keep the last value."
             rehire["wage"] = raw_body
         sessions[phone]["step"] = "rehire_date"
-        return t("rehire_ask_date", phone, example=example_future_date_str())
+        return f"📅 When do you need them? (e.g. {example_future_date_str()}, Tomorrow)"
 
     elif step == "rehire_date":
         is_valid, normalized_date, err = validate_future_date(raw_body)
-        if not is_valid: return err
+        if not is_valid:
+            return err
         rehire = sessions[phone]["rehire"]
         farmer = get_from_db("farmers", phone)
         if not farmer:
             sessions[phone]["step"] = "done"
-            return t("farmer_profile_not_found", phone)
+            return "❌ Could not find your farmer profile. Please try again."
         location = farmer.get("location", "Unknown")
         saved = save_to_db("jobs", {
-            "farmer_phone":  phone,
-            "work_type":     rehire["work_type"],
+            "farmer_phone": phone,
+            "work_type": rehire["work_type"],
             "num_labourers": rehire["num_labourers"],
-            "wage":          rehire["wage"],
-            "start_date":    normalized_date,
-            "location":      location,
-            "status":        "open"
+            "wage": rehire["wage"],
+            "start_date": normalized_date,
+            "location": location,
+            "status": "open"
         })
         sessions[phone]["step"] = "done"
-        if not saved: return t("rehire_error", phone)
-        labourer_phone = rehire["labourer_phone"]
-        send_whatsapp(labourer_phone,
-                      t("rehire_labourer_whatsapp", labourer_phone,
-                        farmer_name=farmer["name"], work_type=rehire["work_type"],
-                        location=location, num_labourers=rehire["num_labourers"],
-                        wage=rehire["wage"], start_date=normalized_date, job_id=saved["id"]))
-        return t("rehire_success", phone,
-                 labourer_name=rehire["labourer_name"], work_type=rehire["work_type"],
-                 num_labourers=rehire["num_labourers"], start_date=normalized_date,
-                 wage=rehire["wage"], job_id=saved["id"])
+        if not saved:
+            return "⚠️ Error sending the rehire invite. Please try again with REHIRE [job_id]."
+        send_whatsapp(
+            rehire["labourer_phone"],
+            f"🔁 *{farmer['name']} wants to rehire you!*\n\n"
+            f"🔨 Work: {rehire['work_type']}\n"
+            f"📍 Location: {location}\n"
+            f"👥 Labourers needed: {rehire['num_labourers']}\n"
+            f"💰 Wage: ₹{rehire['wage']}/day\n"
+            f"📅 Date: {normalized_date}\n\n"
+            f"Reply CONFIRM {saved['id']} to accept this job."
+        )
+        return (
+            f"✅ *Rehire invite sent to {rehire['labourer_name']}!*\n\n"
+            f"🔨 Work: {rehire['work_type']}\n"
+            f"👥 Labourers needed: {rehire['num_labourers']}\n"
+            f"📅 Date: {normalized_date}\n"
+            f"💰 Wage: ₹{rehire['wage']}/day\n\n"
+            f"They'll need to reply CONFIRM {saved['id']} to accept, just like a normal job."
+        )
 
     # ── EQUIPMENT LISTING FLOW ────────────────────────────────────────────────
     elif step == "equip_name":
         sessions[phone]["equip"]["name"] = raw_body
         sessions[phone]["step"] = "equip_rent"
-        return t("ask_rent_per_day", phone, name=raw_body)
+        return f"What is the rent per day for your {raw_body}? (in ₹)"
 
     elif step == "equip_rent":
         if not raw_body.replace(".", "", 1).isdigit():
-            return t("ask_rent_invalid", phone)
+            return "Please enter a valid amount (e.g. 500). What is the rent per day?"
         sessions[phone]["equip"]["rent_per_day"] = raw_body
         sessions[phone]["step"] = "equip_available_until"
-        return t("ask_available_until", phone, example=example_future_date_str(days_ahead=10))
+        return (
+            "Available until which date?\n"
+            f"(e.g. {example_future_date_str(days_ahead=10)}, Tomorrow, or reply *ongoing* if no end date)"
+        )
 
     elif step == "equip_available_until":
-        farmer          = get_from_db("farmers", phone)
-        equip           = sessions[phone]["equip"]
+        farmer = get_from_db("farmers", phone)
+        equip  = sessions[phone]["equip"]
         available_until = None
         if raw_body.strip().lower() not in ("ongoing", "anytime", "-"):
             is_valid, normalized_date, err = validate_future_date(raw_body)
-            if not is_valid: return err
+            if not is_valid:
+                return err
             available_until = normalized_date
         saved = save_equipment({
             "owner_phone":     phone,
@@ -2766,21 +2507,30 @@ def handle_message(phone: str, raw_body: str) -> str:
             "available":       True,
         })
         sessions[phone]["step"] = "done"
-        if not saved: return t("equipment_list_error", phone)
+        if not saved:
+            return "⚠️ Error listing your equipment. Please try again by sending RENT EQUIPMENT."
         notify_nearby_users_about_equipment(saved)
-        until = available_until or t("ongoing_label_short", phone)
-        return t("equipment_listed", phone,
-                 name=equip["name"], rent=equip["rent_per_day"],
-                 location=farmer.get("location", "Unknown"), until=until)
+        return (
+            f"✅ *Equipment Listed!*\n\n"
+            f"🚜 Equipment: {equip['name']}\n"
+            f"💰 Rent: ₹{equip['rent_per_day']}/day\n"
+            f"📍 Location: {farmer.get('location', 'Unknown')}\n"
+            f"📅 Available until: {available_until or 'Ongoing'}\n\n"
+            f"Farmers and labourers nearby can now find your equipment! 🔔"
+        )
 
     # ── FALLBACK ──────────────────────────────────────────────────────────────
     else:
         print(f"[FLOW] Unknown step '{step}' — resetting")
         sessions[phone] = {"step": "start"}
-        return t("start_over", phone)
-
+        return (
+            "Something went wrong. Let's start over.\n\n"
+            "Are you a FARMER or LABOURER?\n"
+            "Reply FARMER or LABOURER to get started."
+        )
 
 # ── Routes ────────────────────────────────────────────────────────────────────
+
 @app.api_route("/ping", methods=["GET", "HEAD"])
 def ping():
     return {"status": "ok"}
@@ -2800,9 +2550,18 @@ async def whatsapp_webhook(
         if NumMedia and NumMedia.isdigit() and int(NumMedia) > 0:
             content_type = (MediaContentType0 or "").lower()
             if content_type.startswith("audio"):
-                reply = t("voice_not_supported", From)
+                reply = (
+                    "🎙️ We got your voice message!\n\n"
+                    "Voice commands aren't supported yet — that's coming in "
+                    "*Phase 3 (Voice AI)* of Farm Connect. 🚀\n\n"
+                    "For now, please reply with text. Send HELP to see what you can do."
+                )
             else:
-                reply = t("media_not_supported", From)
+                reply = (
+                    "📎 We received your attachment, but Farm Connect only "
+                    "understands text messages right now.\n\n"
+                    "Please describe what you need in words, or send HELP for the menu."
+                )
             return twiml_response(reply)
         reply = handle_message(From, Body.strip())
         return twiml_response(reply)
@@ -2849,12 +2608,14 @@ def chat_ui():
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Segoe UI', sans-serif; background: #0b141a; color: #e9edef; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
   .header { background: #202c33; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #313d45; flex-shrink: 0; }
   .header-left { display: flex; align-items: center; gap: 10px; }
   .avatar { width: 40px; height: 40px; border-radius: 50%; background: #00a884; display: flex; align-items: center; justify-content: center; font-size: 20px; }
   .header h1 { font-size: 16px; color: #e9edef; }
   .header span { color: #8696a0; font-size: 12px; }
   .badge { background: #00a884; color: white; font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+
   .phone-bar { background: #111b21; padding: 8px 16px; border-bottom: 1px solid #313d45; display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
   .phone-bar label { color: #8696a0; font-size: 12px; white-space: nowrap; }
   .phone-bar select, .phone-bar input[type=text] { background: #2a3942; border: 1px solid #3b4a54; color: #e9edef; padding: 5px 10px; border-radius: 6px; font-size: 12px; outline: none; }
@@ -2863,23 +2624,29 @@ def chat_ui():
   .btn { border: none; color: white; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; white-space: nowrap; }
   .btn-reset { background: #ea4335; }
   .btn-reset:hover { background: #c5221f; }
+
   #chat { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; background: #0b141a; }
   #chat::-webkit-scrollbar { width: 5px; }
   #chat::-webkit-scrollbar-thumb { background: #374248; border-radius: 4px; }
+
   .bubble-wrap { display: flex; flex-direction: column; }
   .bubble-wrap.sent  { align-items: flex-end; }
   .bubble-wrap.recv  { align-items: flex-start; }
+
   .bubble { max-width: 72%; padding: 7px 12px 4px; border-radius: 8px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; position: relative; }
   .sent .bubble  { background: #005c4b; border-bottom-right-radius: 2px; }
   .recv .bubble  { background: #202c33; border-bottom-left-radius: 2px; }
   .bubble .time  { font-size: 10px; color: #8696a0; margin-top: 2px; text-align: right; }
+
   .typing { color: #8696a0; font-size: 13px; font-style: italic; padding: 4px 0 4px 4px; }
+
   .input-bar { background: #202c33; padding: 10px 14px; display: flex; gap: 10px; align-items: flex-end; border-top: 1px solid #313d45; flex-shrink: 0; }
   #msg { flex: 1; background: #2a3942; border: none; color: #e9edef; padding: 10px 14px; border-radius: 24px; font-size: 14px; outline: none; resize: none; max-height: 120px; overflow-y: auto; line-height: 1.4; }
   #msg::placeholder { color: #8696a0; }
   #send { background: #00a884; border: none; color: white; width: 44px; height: 44px; border-radius: 50%; cursor: pointer; font-size: 18px; flex-shrink: 0; transition: background 0.15s; }
   #send:hover { background: #06cf9c; }
   #send:disabled { background: #3b4a54; cursor: default; }
+
   .chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 16px; background: #111b21; border-top: 1px solid #1f2c33; flex-shrink: 0; }
   .chip { background: #2a3942; border: 1px solid #3b4a54; color: #aebac1; font-size: 11px; padding: 4px 10px; border-radius: 14px; cursor: pointer; transition: background 0.15s; user-select: none; }
   .chip:hover { background: #3b4a54; color: #e9edef; }
@@ -2888,13 +2655,18 @@ def chat_ui():
 </style>
 </head>
 <body>
+
 <div class="header">
   <div class="header-left">
     <div class="avatar">🌾</div>
-    <div><h1>Farm Connect Bot</h1><span>Web Test Interface</span></div>
+    <div>
+      <h1>Farm Connect Bot</h1>
+      <span>Web Test Interface</span>
+    </div>
   </div>
   <span class="badge">TEST MODE</span>
 </div>
+
 <div class="phone-bar">
   <label>Testing as:</label>
   <select id="phonePreset" onchange="updatePhone()">
@@ -2907,6 +2679,7 @@ def chat_ui():
   <input type="text" id="customPhone" placeholder="e.g. whatsapp:+91XXXXXXXXXX" style="display:none">
   <button class="btn btn-reset" onclick="resetSession()">🔄 Reset Session</button>
 </div>
+
 <div id="chat">
   <div class="bubble-wrap recv">
     <div class="bubble">👋 Welcome to Farm Connect Web Tester!
@@ -2914,6 +2687,7 @@ Type any message below or tap a quick reply.
 <div class="time">now</div></div>
   </div>
 </div>
+
 <div class="chips">
   <span class="chip" onclick="quickSend('Hi')">Hi</span>
   <span class="chip" onclick="quickSend('HELP')">HELP</span>
@@ -2932,23 +2706,28 @@ Type any message below or tap a quick reply.
   <span class="chip" onclick="quickSend('UPDATE SKILL')">UPDATE SKILL</span>
   <span class="chip" onclick="quickSend('MY PROFILE')">MY PROFILE</span>
 </div>
+
 <div class="input-bar">
   <textarea id="msg" rows="1" placeholder="Type a message..."></textarea>
   <button id="send" onclick="sendMessage()">➤</button>
 </div>
+
 <script>
   function getPhone() {
     const preset = document.getElementById('phonePreset').value;
     if (preset === 'custom') return document.getElementById('customPhone').value.trim() || 'custom_test';
     return preset;
   }
+
   function updatePhone() {
     const custom = document.getElementById('customPhone');
     custom.style.display = document.getElementById('phonePreset').value === 'custom' ? 'inline' : 'none';
   }
+
   function nowTime() {
     return new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
   }
+
   function addBubble(text, type) {
     const chat = document.getElementById('chat');
     const wrap = document.createElement('div');
@@ -2957,44 +2736,84 @@ Type any message below or tap a quick reply.
     chat.appendChild(wrap);
     chat.scrollTop = chat.scrollHeight;
   }
+
   function escHtml(str) {
     let s = str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     s = s.replace(/(https?:\\/\\/[^\\s<]+)/g,
       '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#53bdeb;text-decoration:underline;">$1</a>');
     return s;
   }
+
   function showTyping() {
     const chat = document.getElementById('chat');
     const el = document.createElement('div');
-    el.id = 'typing'; el.className = 'typing'; el.textContent = 'Bot is typing...';
-    chat.appendChild(el); chat.scrollTop = chat.scrollHeight;
+    el.id = 'typing';
+    el.className = 'typing';
+    el.textContent = 'Bot is typing...';
+    chat.appendChild(el);
+    chat.scrollTop = chat.scrollHeight;
   }
-  function hideTyping() { const el = document.getElementById('typing'); if (el) el.remove(); }
+
+  function hideTyping() {
+    const el = document.getElementById('typing');
+    if (el) el.remove();
+  }
+
   async function sendMessage(overrideText) {
-    const input = document.getElementById('msg');
-    const btn   = document.getElementById('send');
-    const text  = overrideText || input.value.trim();
+    const input  = document.getElementById('msg');
+    const btn    = document.getElementById('send');
+    const text   = overrideText || input.value.trim();
     if (!text) return;
+
     const phone = getPhone();
     if (!overrideText) { input.value = ''; input.style.height = 'auto'; }
-    addBubble(text, 'sent'); btn.disabled = true; showTyping();
+    addBubble(text, 'sent');
+    btn.disabled = true;
+    showTyping();
+
     try {
-      const res  = await fetch('/chat', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone,message:text})});
+      const res  = await fetch('/chat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({phone, message: text})
+      });
       const data = await res.json();
-      hideTyping(); addBubble(data.reply, 'recv');
-    } catch(e) { hideTyping(); addBubble('⚠️ Could not reach bot. Is Render running?', 'recv'); }
-    finally { btn.disabled = false; input.focus(); }
+      hideTyping();
+      addBubble(data.reply, 'recv');
+    } catch(e) {
+      hideTyping();
+      addBubble('⚠️ Could not reach bot. Is Render running?', 'recv');
+    } finally {
+      btn.disabled = false;
+      input.focus();
+    }
   }
-  function quickSend(text) { sendMessage(text); }
+
+  function quickSend(text) {
+    sendMessage(text);
+  }
+
   async function resetSession() {
     const phone = getPhone();
-    try { await fetch('/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone})}); } catch(e) {}
+    try {
+      await fetch('/reset', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({phone})
+      });
+    } catch(e) {}
     document.getElementById('chat').innerHTML = '';
     addBubble(`Session reset for ${phone}.\\nSay Hi to start fresh! 👋`, 'recv');
   }
+
   const msgEl = document.getElementById('msg');
-  msgEl.addEventListener('keydown', e => { if (e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();} });
-  msgEl.addEventListener('input', function() { this.style.height='auto'; this.style.height=Math.min(this.scrollHeight,120)+'px'; });
+  msgEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  });
+  msgEl.addEventListener('input', function() {
+    this.style.height = 'auto';
+    this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+  });
 </script>
 </body>
 </html>"""
