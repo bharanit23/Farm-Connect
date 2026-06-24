@@ -97,14 +97,18 @@ LOCALIZED_COMMANDS = {
     "मेरी नौकरियाँ":     "MY JOBS",
     "नौकरियाँ देखें":    "VIEW JOBS",
     "स्वीकार करें":      "CONFIRM",
+    "स्वीकार":           "CONFIRM",
     "रद्द करें":          "CANCEL",
+    "रद्द":               "CANCEL",
     "रेट करें":           "RATE",
     "काम पूरा":           "JOB DONE",
     "कौशल बदलें":        "UPDATE SKILL",
+    "कौशल बदल":          "UPDATE SKILL",
     "उपकरण किराया":      "RENT EQUIPMENT",
     "उपकरण देखें":       "VIEW EQUIPMENT",
     "मेरे उपकरण":        "MY EQUIPMENT",
     "उपकरण बुक करें":    "BOOK EQUIPMENT",
+    "उपकरण बुक":         "BOOK EQUIPMENT",
     "योजनाएँ":           "SUBSIDIES",
     "मेरी प्रोफ़ाइल":    "MY PROFILE",
     "नौकरी इतिहास":      "JOB HISTORY",
@@ -118,19 +122,45 @@ LOCALIZED_COMMANDS = {
     "मेरे किसान":        "MY FARMERS",
 }
 
+# Verb-forming particles that natural speakers commonly glue onto a bare
+# noun-style command, with or without a space — e.g. "ரத்து" (cancellation)
+# becomes "ரத்துசெய்" / "ரத்து செய்" (cancel-do) in everyday usage, and
+# "रद्द" similarly becomes "रद्द करें" / "रद्द कर". Sorted longest-first so
+# e.g. "செய்யுங்கள்" isn't mistakenly trimmed down to just "செய்".
+_VERB_PARTICLES = sorted([
+    "செய்யுங்கள்", "செய்து", "செய்",      # Tamil: please-do / having-done / do
+    "பண்ணுங்கள்", "பண்ணு",                 # Tamil (colloquial): do
+    "कीजिए", "करें", "करो", "कर",          # Hindi: do (formal/casual)
+], key=len, reverse=True)
+
 def normalize_command(raw_body: str) -> str:
     """Translate a localized (Tamil/Hindi) command back to the English canonical.
     Handles commands with trailing IDs/numbers, e.g. 'உறுதிப்படுத்து 12' → 'CONFIRM 12'.
+    Also handles a verb particle glued onto a bare command, with or without a
+    space, e.g. 'ரத்துசெய் 18' / 'ரத்து செய் 18' / 'रद्द कर 18' → 'CANCEL 18'.
     Returns the (possibly transformed) string; falls back to raw_body unchanged."""
     stripped = raw_body.strip()
     # Try exact match first
     if stripped in LOCALIZED_COMMANDS:
         return LOCALIZED_COMMANDS[stripped]
-    # Try prefix match (command + space + number/args)
-    for local_cmd, eng_cmd in LOCALIZED_COMMANDS.items():
-        if stripped.startswith(local_cmd + " "):
-            suffix = stripped[len(local_cmd):].strip()
-            return f"{eng_cmd} {suffix}"
+    # Try longer commands first so a multi-word command isn't shadowed by a
+    # shorter one that happens to share its opening word(s).
+    candidates = sorted(LOCALIZED_COMMANDS.items(), key=lambda kv: -len(kv[0]))
+    for local_cmd, eng_cmd in candidates:
+        if not stripped.startswith(local_cmd):
+            continue
+        remainder = stripped[len(local_cmd):].lstrip(" ")
+        # Strip an optional verb particle glued directly onto the command
+        for particle in _VERB_PARTICLES:
+            if remainder.startswith(particle):
+                remainder = remainder[len(particle):]
+                break
+        suffix = remainder.strip()
+        # Only treat this as a genuine match if what's left is empty (no
+        # args needed) or clearly an argument (starts with a digit) —
+        # otherwise this was likely a different word sharing a prefix.
+        if suffix == "" or suffix[0].isdigit():
+            return f"{eng_cmd} {suffix}".strip() if suffix else eng_cmd
     return raw_body
 
 
@@ -361,6 +391,31 @@ T = {
         "📞 Contact: {phone}\n💰 Rent: ₹{rent}/day\n\nPlease coordinate with them for pickup/delivery."
     ),
     "equip_cancel_booker_whatsapp": "⚠️ *Equipment Booking Cancelled*\n\n🚜 Equipment: {name}\n📍 Location: {location}\n\nThe owner has cancelled this listing. Sorry for the inconvenience.",
+    # Per-command format-hint errors (previously hardcoded English-only)
+    "rehire_invalid_format":          "❓ Couldn't read that.\n\nFormat: REHIRE [job_id]\nExample: REHIRE 12",
+    "jobdone_invalid_format":         "❓ Couldn't read that.\n\nFormat: JOB DONE [job_id]\nExample: JOB DONE 12",
+    "confirm_invalid_format":         "❓ Couldn't read that.\n\nFormat: CONFIRM [job_id]\nExample: CONFIRM 3",
+    "noshow_invalid_format":          "❓ Couldn't read that.\n\nFormat: NO SHOW [job_id]\nExample: NO SHOW 12",
+    "cancel_invalid_format":          "❓ Couldn't read that.\n\nFormat: CANCEL [job_id]\nExample: CANCEL 7",
+    "bookequipment_invalid_format":   "❓ Couldn't read that.\n\nFormat: BOOK EQUIPMENT [id]\nExample: BOOK EQUIPMENT 3",
+    "cancelequipment_invalid_format": "❓ Couldn't read that.\n\nFormat: CANCEL EQUIPMENT [id]\nExample: CANCEL EQUIPMENT 3",
+    "subsidy_invalid_format":         "❓ Couldn't read that.\n\nFormat: SUBSIDY [number]\nExample: SUBSIDY 2",
+    # Date parsing / validation (previously hardcoded English-only)
+    "date_invalid_value":  "❓ That doesn't look like a valid date. Please use a format like '{example}' or 'Tomorrow'.",
+    "date_unrecognized":   "❓ Couldn't understand that date.\n\nPlease reply with a date like '{example1}', '{example2}', or 'Tomorrow'.",
+    "date_in_past": (
+        "❌ That date ({date}) is in the past.\n\n"
+        "Please enter a future date (today or later), e.g. '{today}' or 'Tomorrow'."
+    ),
+    # Deadline / scheme-expiry phrases (previously hardcoded English-only)
+    "deadline_expired": "expired",
+    "deadline_today":    "⚠️ Last day today!",
+    "deadline_urgent":   "⚠️ Only {delta} day{s} left!",
+    "deadline_soon":     "🔔 {delta} days left",
+    "deadline_far":      "📅 Deadline: {date}",
+    "scheme_ongoing":    "🟢 Ongoing",
+    # Generic fallback for unexpected errors
+    "generic_error": "⚠️ Something went wrong. Please try again.",
 }
 
 # ── In-memory translation cache ───────────────────────────────────────────────
@@ -536,7 +591,7 @@ def parse_relative_date(text):
     if t_low == "next week":return today.fromordinal(today.toordinal() + 7)
     return None
 
-def parse_job_date(raw_text):
+def parse_job_date(raw_text, phone):
     text = raw_text.strip()
     today = date.today()
     rel = parse_relative_date(text)
@@ -572,37 +627,40 @@ def parse_job_date(raw_text):
             try:
                 candidate = date(year_num, month_num, day_num)
             except ValueError:
-                return None, f"❓ That doesn't look like a valid date. Please use a format like '{example_future_date_str()}' or 'Tomorrow'."
+                return None, t("date_invalid_value", phone, example=example_future_date_str())
             if not year_str and candidate < today:
                 candidate = candidate.replace(year=candidate.year + 1)
             return candidate, None
-    return None, f"❓ Couldn't understand that date.\n\nPlease reply with a date like '{example_future_date_str()}', '{example_future_date_str(fmt='%d/%m/%Y')}', or 'Tomorrow'."
+    return None, t("date_unrecognized", phone,
+                    example1=example_future_date_str(),
+                    example2=example_future_date_str(fmt='%d/%m/%Y'))
 
 def example_future_date_str(days_ahead: int = 5, fmt: str = "%d %B %Y") -> str:
     today = date.today()
     return today.fromordinal(today.toordinal() + days_ahead).strftime(fmt)
 
-def validate_future_date(raw_text):
-    parsed, err = parse_job_date(raw_text)
+def validate_future_date(raw_text, phone):
+    parsed, err = parse_job_date(raw_text, phone)
     if err:
         return False, None, err
     today = date.today()
     if parsed < today:
-        return False, None, (
-            f"❌ That date ({parsed.strftime('%d %B %Y')}) is in the past.\n\n"
-            f"Please enter a future date (today or later), e.g. "
-            f"'{today.strftime('%d %B %Y')}' or 'Tomorrow'."
+        return False, None, t(
+            "date_in_past", phone,
+            date=parsed.strftime('%d %B %Y'),
+            today=today.strftime('%d %B %Y'),
         )
     return True, parsed.strftime("%d %B %Y"), None
 
+
 # ── Days-until helper ─────────────────────────────────────────────────────────
-def days_until(d: date) -> str:
+def days_until(d: date, phone: str) -> str:
     delta = (d - date.today()).days
-    if delta < 0:  return "expired"
-    if delta == 0: return "⚠️ Last day today!"
-    if delta <= 7: return f"⚠️ Only {delta} day{'s' if delta != 1 else ''} left!"
-    if delta <= 30:return f"🔔 {delta} days left"
-    return f"📅 Deadline: {d.strftime('%d %b %Y')}"
+    if delta < 0:  return t("deadline_expired", phone)
+    if delta == 0: return t("deadline_today", phone)
+    if delta <= 7: return t("deadline_urgent", phone, delta=delta, s="" if delta == 1 else "s")
+    if delta <= 30:return t("deadline_soon", phone, delta=delta)
+    return t("deadline_far", phone, date=d.strftime('%d %b %Y'))
 
 # ── Government subsidy schemes ────────────────────────────────────────────────
 SUBSIDY_SCHEMES = [
@@ -689,9 +747,9 @@ def expired_schemes(today: date = None) -> list:
     today = today or date.today()
     return [s for s in SUBSIDY_SCHEMES if s["end_date"] and s["end_date"] < today]
 
-def expiry_tag(scheme: dict) -> str:
-    if scheme["end_date"] is None: return "🟢 Ongoing"
-    return days_until(scheme["end_date"])
+def expiry_tag(scheme: dict, phone: str) -> str:
+    if scheme["end_date"] is None: return t("scheme_ongoing", phone)
+    return days_until(scheme["end_date"], phone)
 
 def next_cycle_estimate_str(scheme: dict, phone: str) -> str:
     est_start = scheme["start_date"].replace(year=scheme["start_date"].year + 1)
@@ -699,8 +757,11 @@ def next_cycle_estimate_str(scheme: dict, phone: str) -> str:
 
 def renewal_or_deadline_line(scheme: dict, phone: str) -> str:
     if scheme["end_date"] is None:
-        return scheme.get("renewal_note") or t("no_deadline", phone)
-    return f"📅 Deadline: {scheme['end_date'].strftime('%d %B %Y')}"
+        note = scheme.get("renewal_note")
+        if note:
+            return tr(note, get_lang(phone))
+        return t("no_deadline", phone)
+    return t("deadline_far", phone, date=scheme['end_date'].strftime('%d %B %Y'))
 
 # ── Nearby-areas lookup ───────────────────────────────────────────────────────
 NEARBY_AREAS = {
@@ -1500,7 +1561,7 @@ def handle_message(phone: str, raw_body: str) -> str:
             parts = raw_body.split()
             if len(parts) < 2 or not parts[1].isdigit():
                 return t("rehire_not_farmer", phone) if not get_from_db("farmers", phone) else \
-                       "❓ Couldn't read that.\n\nFormat: REHIRE [job_id]\nExample: REHIRE 12"
+                       t("rehire_invalid_format", phone)
             job_id = parts[1]
             farmer = get_from_db("farmers", phone)
             if not farmer:
@@ -1613,7 +1674,7 @@ def handle_message(phone: str, raw_body: str) -> str:
                 if deadlines:
                     msg += t("today_subsidy_deadlines", phone)
                     for s in deadlines:
-                        msg += f"   • {s['name']} — {days_until(s['end_date'])}\n"
+                        msg += f"   • {s['name']} — {days_until(s['end_date'], phone)}\n"
                     msg += "\n"
                 if not pending_confirm and not pending_rate and not deadlines:
                     msg += t("today_nothing_farmer", phone)
@@ -1643,7 +1704,7 @@ def handle_message(phone: str, raw_body: str) -> str:
                 if deadlines:
                     msg += t("today_subsidy_deadlines", phone)
                     for s in deadlines:
-                        msg += f"   • {s['name']} — {days_until(s['end_date'])}\n"
+                        msg += f"   • {s['name']} — {days_until(s['end_date'], phone)}\n"
                     msg += "\n"
                 if not open_jobs and not pending_confirm and not pending_rate and not deadlines:
                     msg += t("today_nothing_labourer", phone)
@@ -1668,7 +1729,7 @@ def handle_message(phone: str, raw_body: str) -> str:
         elif message.startswith("JOB DONE"):
             parts = raw_body.split()
             if len(parts) < 3 or not parts[2].isdigit():
-                return "❓ Couldn't read that.\n\nFormat: JOB DONE [job_id]\nExample: JOB DONE 12"
+                return t("jobdone_invalid_format", phone)
             job_id = parts[2]
             farmer = get_from_db("farmers", phone)
             if not farmer:
@@ -1800,7 +1861,7 @@ def handle_message(phone: str, raw_body: str) -> str:
         elif message.startswith("CONFIRM"):
             parts = raw_body.split()
             if len(parts) < 2 or not parts[1].isdigit():
-                return "❓ Couldn't read that.\n\nFormat: CONFIRM [job_id]\nExample: CONFIRM 3"
+                return t("confirm_invalid_format", phone)
             job_id   = parts[1]
             labourer = get_from_db("labourers", phone)
             if not labourer:
@@ -1832,7 +1893,7 @@ def handle_message(phone: str, raw_body: str) -> str:
         elif message.startswith("NO SHOW"):
             parts = raw_body.split()
             if len(parts) < 3 or not parts[2].isdigit():
-                return "❓ Couldn't read that.\n\nFormat: NO SHOW [job_id]\nExample: NO SHOW 12"
+                return t("noshow_invalid_format", phone)
             job_id = parts[2]
             farmer = get_from_db("farmers", phone)
             if not farmer:
@@ -1858,7 +1919,7 @@ def handle_message(phone: str, raw_body: str) -> str:
         elif message.startswith("CANCEL") and not message.startswith("CANCEL EQUIPMENT"):
             parts = raw_body.split()
             if len(parts) < 2 or not parts[1].isdigit():
-                return "❓ Couldn't read that.\n\nFormat: CANCEL [job_id]\nExample: CANCEL 7"
+                return t("cancel_invalid_format", phone)
             job_id  = parts[1]
             updated = update_db("jobs", {"id": job_id, "farmer_phone": phone}, {"status": "cancelled"})
             if not updated:
@@ -1903,7 +1964,7 @@ def handle_message(phone: str, raw_body: str) -> str:
         elif message.startswith("BOOK EQUIPMENT"):
             parts = raw_body.split()
             if len(parts) < 3 or not parts[2].isdigit():
-                return "❓ Couldn't read that.\n\nFormat: BOOK EQUIPMENT [id]\nExample: BOOK EQUIPMENT 3"
+                return t("bookequipment_invalid_format", phone)
             equipment_id = parts[2]
             user = get_from_db("farmers", phone) or get_from_db("labourers", phone)
             if not user:
@@ -1947,7 +2008,7 @@ def handle_message(phone: str, raw_body: str) -> str:
         elif message.startswith("CANCEL EQUIPMENT"):
             parts = raw_body.split()
             if len(parts) < 3 or not parts[2].isdigit():
-                return "❓ Couldn't read that.\n\nFormat: CANCEL EQUIPMENT [id]\nExample: CANCEL EQUIPMENT 3"
+                return t("cancelequipment_invalid_format", phone)
             equipment_id = parts[2]
             item = get_equipment_by_id(equipment_id)
             if not item:
@@ -1973,8 +2034,8 @@ def handle_message(phone: str, raw_body: str) -> str:
             lang = get_lang(phone)
             msg = t("subsidies_header", phone) if schemes else t("subsidies_none", phone)
             for i, scheme in enumerate(schemes):
-                short = tr(scheme["short"], lang)
-                msg += f"{i+1}. 📌 {scheme['name']}\n   {short}\n   {expiry_tag(scheme)}\n\n"
+                short = scheme_field(scheme, "short", lang)
+                msg += f"{i+1}. 📌 {scheme['name']}\n   {short}\n   {expiry_tag(scheme, phone)}\n\n"
             if expired:
                 msg += t("subsidies_expired_header", phone)
                 offset = len(schemes)
@@ -1988,7 +2049,7 @@ def handle_message(phone: str, raw_body: str) -> str:
         elif message.startswith("SUBSIDY"):
             parts = raw_body.split()
             if len(parts) < 2 or not parts[1].isdigit():
-                return "❓ Couldn't read that.\n\nFormat: SUBSIDY [number]\nExample: SUBSIDY 2"
+                return t("subsidy_invalid_format", phone)
             schemes  = active_schemes()
             expired  = expired_schemes()
             combined = schemes + expired
@@ -1998,10 +2059,10 @@ def handle_message(phone: str, raw_body: str) -> str:
             scheme     = combined[index]
             is_expired = index >= len(schemes)
             lang = get_lang(phone)
-            eligibility  = tr(scheme["eligibility"],  lang)
-            benefit      = tr(scheme["benefit"],       lang)
-            how_to_apply = tr(scheme["how_to_apply"], lang)
-            short        = tr(scheme["short"],         lang)
+            eligibility  = scheme_field(scheme, "eligibility",  lang)
+            benefit      = scheme_field(scheme, "benefit",       lang)
+            how_to_apply = scheme_field(scheme, "how_to_apply", lang)
+            short        = scheme_field(scheme, "short",         lang)
             if is_expired:
                 return t("subsidy_detail_expired", phone,
                          name=scheme["name"],
@@ -2010,7 +2071,7 @@ def handle_message(phone: str, raw_body: str) -> str:
                          eligibility=eligibility, benefit=benefit,
                          how_to_apply=how_to_apply, link=scheme["link"])
             return t("subsidy_detail_active", phone,
-                     name=scheme["name"], tag=expiry_tag(scheme),
+                     name=scheme["name"], tag=expiry_tag(scheme, phone),
                      deadline_line=renewal_or_deadline_line(scheme, phone),
                      eligibility=eligibility, benefit=benefit,
                      how_to_apply=how_to_apply, link=scheme["link"])
@@ -2062,7 +2123,7 @@ def handle_message(phone: str, raw_body: str) -> str:
         return date_prompt
 
     elif step == "job_date":
-        is_valid, normalized_date, err = validate_future_date(raw_body)
+        is_valid, normalized_date, err = validate_future_date(raw_body, phone)
         if not is_valid:
             return err
         job    = sessions[phone]["job"]
@@ -2082,7 +2143,7 @@ def handle_message(phone: str, raw_body: str) -> str:
             return t("job_post_error", phone)
         notify_nearby_labourers(saved)
         weather_line = ""
-        parsed_date, _ = parse_job_date(raw_body)
+        parsed_date, _ = parse_job_date(raw_body, phone)
         if parsed_date:
             risk = get_rain_risk(location, parsed_date)
             if risk:
@@ -2119,7 +2180,7 @@ def handle_message(phone: str, raw_body: str) -> str:
         return t("rehire_ask_date", phone, example=example_future_date_str())
 
     elif step == "rehire_date":
-        is_valid, normalized_date, err = validate_future_date(raw_body)
+        is_valid, normalized_date, err = validate_future_date(raw_body, phone)
         if not is_valid:
             return err
         rehire = sessions[phone]["rehire"]
@@ -2164,7 +2225,7 @@ def handle_message(phone: str, raw_body: str) -> str:
         equip  = sessions[phone]["equip"]
         available_until = None
         if raw_body.strip().lower() not in ("ongoing", "anytime", "-"):
-            is_valid, normalized_date, err = validate_future_date(raw_body)
+            is_valid, normalized_date, err = validate_future_date(raw_body, phone)
             if not is_valid:
                 return err
             available_until = normalized_date
