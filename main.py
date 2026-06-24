@@ -1226,7 +1226,12 @@ def handle_message(phone: str, raw_body: str) -> str:
         set_lang(phone, lang_key)
         prev = sessions[phone].pop("prev_step", "done")
         sessions[phone]["step"] = prev
-        conf = t("language_set", phone)
+        _lang_conf = {
+            "EN": "✅ Language set to *English*. All messages will now be in English.",
+            "TA": "✅ மொழி *தமிழ்* ஆக அமைக்கப்பட்டது. இனி எல்லா செய்திகளும் தமிழில் இருக்கும்.",
+            "HI": "✅ भाषा *हिंदी* पर सेट की गई। अब सभी संदेश हिंदी में होंगे।",
+        }
+        conf = _lang_conf[lang_key]
         if prev == "done":
             menu = welcome_back(phone)
             if menu:
