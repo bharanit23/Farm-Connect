@@ -1900,9 +1900,11 @@ def handle_message(phone: str, raw_body: str) -> str:
             expired = expired_schemes()
             if not schemes and not expired:
                 return t("subsidies_no_schemes", phone)
+            lang = get_lang(phone)
             msg = t("subsidies_header", phone) if schemes else t("subsidies_none", phone)
             for i, scheme in enumerate(schemes):
-                msg += f"{i+1}. 📌 {scheme['name']}\n   {scheme['short']}\n   {expiry_tag(scheme)}\n\n"
+                short = tr(scheme["short"], lang)
+                msg += f"{i+1}. 📌 {scheme['name']}\n   {short}\n   {expiry_tag(scheme)}\n\n"
             if expired:
                 msg += t("subsidies_expired_header", phone)
                 offset = len(schemes)
@@ -1925,18 +1927,23 @@ def handle_message(phone: str, raw_body: str) -> str:
                 return t("subsidy_invalid_number", phone, count=len(combined))
             scheme     = combined[index]
             is_expired = index >= len(schemes)
+            lang = get_lang(phone)
+            eligibility  = tr(scheme["eligibility"],  lang)
+            benefit      = tr(scheme["benefit"],       lang)
+            how_to_apply = tr(scheme["how_to_apply"], lang)
+            short        = tr(scheme["short"],         lang)
             if is_expired:
                 return t("subsidy_detail_expired", phone,
                          name=scheme["name"],
                          end_date=scheme["end_date"].strftime("%d %B %Y"),
                          next_cycle=next_cycle_estimate_str(scheme, phone),
-                         eligibility=scheme["eligibility"], benefit=scheme["benefit"],
-                         how_to_apply=scheme["how_to_apply"], link=scheme["link"])
+                         eligibility=eligibility, benefit=benefit,
+                         how_to_apply=how_to_apply, link=scheme["link"])
             return t("subsidy_detail_active", phone,
                      name=scheme["name"], tag=expiry_tag(scheme),
                      deadline_line=renewal_or_deadline_line(scheme, phone),
-                     eligibility=scheme["eligibility"], benefit=scheme["benefit"],
-                     how_to_apply=scheme["how_to_apply"], link=scheme["link"])
+                     eligibility=eligibility, benefit=benefit,
+                     how_to_apply=how_to_apply, link=scheme["link"])
 
         # Unknown command
         else:
