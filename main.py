@@ -597,12 +597,16 @@ DATE_FORMATS = [
     "%Y-%m-%d",
 ]
 
+_RELATIVE_TODAY    = {"today", "இன்று", "आज"}
+_RELATIVE_TOMORROW = {"tomorrow", "நாளை", "நாளை)", "நாளைi", "நாள", "கல", "कल"}
+_RELATIVE_NEXTWEEK = {"next week", "அடுத்த வாரம்", "अगले हफ्ते", "अगला हफ्ता"}
+
 def parse_relative_date(text):
-    t_low = text.strip().lower()
+    t_low = text.strip().lower().rstrip(").,!")
     today = date.today()
-    if t_low == "today":    return today
-    if t_low == "tomorrow": return today.fromordinal(today.toordinal() + 1)
-    if t_low == "next week":return today.fromordinal(today.toordinal() + 7)
+    if t_low in _RELATIVE_TODAY:    return today
+    if t_low in _RELATIVE_TOMORROW: return today.fromordinal(today.toordinal() + 1)
+    if t_low in _RELATIVE_NEXTWEEK: return today.fromordinal(today.toordinal() + 7)
     return None
 
 def parse_job_date(raw_text, phone):
@@ -1167,7 +1171,17 @@ def increment_no_show(labourer_phone):
 
 def get_average_wage(work_type, location):
     try:
-        words = [w for w in re.findall(r"[A-Za-z]+", work_type or "") if len(w) >= 3]
+        # Translate Tamil/Hindi work type to English for DB keyword search
+        wt_english = work_type or ""
+        if wt_english:
+            try:
+                from deep_translator import GoogleTranslator
+                translated = GoogleTranslator(source="auto", target="en").translate(wt_english)
+                if translated:
+                    wt_english = translated
+            except Exception:
+                pass  # fallback to original
+        words = [w for w in re.findall(r"[A-Za-z]+", wt_english) if len(w) >= 3]
         if not words: return None
         key_word = words[0]
         url = (f"{SUPABASE_URL}/rest/v1/jobs?{build_location_or_filter(location)}"
@@ -1699,8 +1713,8 @@ def handle_message(phone: str, raw_body: str) -> str:
                     no_show  = lab.get("no_show_count", 0) if lab else 0
                     flag = t("no_show_flag", phone, count=no_show) if no_show else ""
                     msg += (f"🔹 Job #{job['id']}\n"
-                            f"   Work: {job['work_type']} | Date: {job['start_date']}\n"
-                            f"   Labourer: {lab_name}{flag}\n"
+                            f"   {t('lbl_work', phone)}: {job['work_type']} | {t('lbl_date', phone)}: {job['start_date']}\n"
+                            f"   {t('lbl_labourer', phone)}: {lab_name}{flag}\n"
                             f"   {t('in_progress', phone)}\n\n")
                 msg += t("my_labourers_pending_footer", phone)
             if completed:
@@ -1711,8 +1725,8 @@ def handle_message(phone: str, raw_body: str) -> str:
                     lab_name = lab["name"] if lab else t("unknown_name", phone)
                     rating_str = f" ({lab['rating']}⭐)" if lab and lab.get("rating") else ""
                     msg += (f"🔹 Job #{job['id']}\n"
-                            f"   Work: {job['work_type']} | Date: {job['start_date']}\n"
-                            f"   Labourer: {lab_name}{rating_str}\n"
+                            f"   {t('lbl_work', phone)}: {job['work_type']} | {t('lbl_date', phone)}: {job['start_date']}\n"
+                            f"   {t('lbl_labourer', phone)}: {lab_name}{rating_str}\n"
                             f"   {rated}\n\n")
                 msg += t("my_labourers_completed_footer", phone)
             return msg
@@ -1764,8 +1778,8 @@ def handle_message(phone: str, raw_body: str) -> str:
                     farm = get_from_db("farmers", job.get("farmer_phone")) if job.get("farmer_phone") else None
                     farm_name = farm["name"] if farm else t("unknown_name", phone)
                     msg += (f"🔹 Job #{job['id']}\n"
-                            f"   Work: {job['work_type']} | Date: {job['start_date']}\n"
-                            f"   Farmer: {farm_name}\n"
+                            f"   {t('lbl_work', phone)}: {job['work_type']} | {t('lbl_date', phone)}: {job['start_date']}\n"
+                            f"   {t('lbl_farmer', phone)}: {farm_name}\n"
                             f"   {t('my_farmers_pending_waiting', phone)}\n\n")
             if completed:
                 msg += t("my_farmers_completed_header", phone)
@@ -1775,8 +1789,8 @@ def handle_message(phone: str, raw_body: str) -> str:
                     farm_name = farm["name"] if farm else t("unknown_name", phone)
                     rating_str = f" ({farm['rating']}⭐)" if farm and farm.get("rating") else ""
                     msg += (f"🔹 Job #{job['id']}\n"
-                            f"   Work: {job['work_type']} | Date: {job['start_date']}\n"
-                            f"   Farmer: {farm_name}{rating_str}\n"
+                            f"   {t('lbl_work', phone)}: {job['work_type']} | {t('lbl_date', phone)}: {job['start_date']}\n"
+                            f"   {t('lbl_farmer', phone)}: {farm_name}{rating_str}\n"
                             f"   {rated}\n\n")
                 msg += t("my_farmers_completed_footer", phone)
             return msg
@@ -1799,7 +1813,7 @@ def handle_message(phone: str, raw_body: str) -> str:
                     f"{icon} Job #{job['id']} — {job['work_type']}\n"
                     f"   📍 {job['location']} | 📅 {job['start_date']}\n"
                     f"   {t('job_history_farmer_label', phone, f_name=farm_name, wage=job['wage'])}\n"
-                    f"   Status: {job['status'].upper()}\n\n"
+                    f"   {t('lbl_status', phone)}: {job['status'].upper()}\n\n"
                 )
             msg = t("job_history_header", phone)
             if ongoing:
@@ -1825,12 +1839,12 @@ def handle_message(phone: str, raw_body: str) -> str:
                 if pending_confirm:
                     msg += t("today_in_progress", phone, count=len(pending_confirm))
                     for job in pending_confirm[:3]:
-                        msg += f"   • #{job['id']} {job['work_type']} — JOB DONE {job['id']}\n"
+                        msg += t("today_job_done_hint", phone, job_id=job['id'], work_type=job['work_type'])
                     msg += "\n"
                 if pending_rate:
                     msg += t("today_pending_rate", phone, count=len(pending_rate))
                     for job in pending_rate[:3]:
-                        msg += f"   • RATE {job['id']} [1-5]\n"
+                        msg += t("today_rate_hint", phone, job_id=job['id'])
                     msg += "\n"
                 if deadlines:
                     msg += t("today_subsidy_deadlines", phone)
@@ -1850,17 +1864,17 @@ def handle_message(phone: str, raw_body: str) -> str:
                 if open_jobs:
                     msg += t("today_open_jobs", phone, count=len(open_jobs), location=labourer["location"])
                     for job in open_jobs[:3]:
-                        msg += f"   • #{job['id']} {job['work_type']} — ₹{job['wage']}/day — CONFIRM {job['id']}\n"
+                        msg += t("today_confirm_hint", phone, job_id=job['id'], work_type=job['work_type'], wage=job['wage'])
                     msg += "\n"
                 if pending_confirm:
                     msg += t("today_accepted_jobs", phone, count=len(pending_confirm))
                     for job in pending_confirm[:3]:
-                        msg += f"   • #{job['id']} {job['work_type']} on {job['start_date']}\n"
+                        msg += t("today_on_date", phone, job_id=job['id'], work_type=job['work_type'], start_date=job['start_date'])
                     msg += "\n"
                 if pending_rate:
                     msg += t("today_pending_rate", phone, count=len(pending_rate))
                     for job in pending_rate[:3]:
-                        msg += f"   • RATE {job['id']} [1-5]\n"
+                        msg += t("today_rate_hint", phone, job_id=job['id'])
                     msg += "\n"
                 if deadlines:
                     msg += t("today_subsidy_deadlines", phone)
@@ -1990,7 +2004,7 @@ def handle_message(phone: str, raw_body: str) -> str:
                 icon  = status_icon.get(job["status"], "⚪")
                 label = status_label.get(job["status"], job["status"].upper())
                 msg += (f"{i+1}. {job['work_type']} — {job['location']}\n"
-                        f"   👥 {job['num_labourers']} labourers | ₹{job['wage']}/day\n"
+                        f"   👥 {job['num_labourers']} {t('lbl_labourers', phone)} | ₹{job['wage']}/day\n"
                         f"   📅 {job['start_date']} | {icon} {label}\n"
                         f"   ID: {job['id']}\n\n")
             msg += t("my_jobs_footer", phone)
@@ -2309,7 +2323,7 @@ def handle_message(phone: str, raw_body: str) -> str:
             risk = get_rain_risk(location, parsed_date)
             if risk:
                 _, label = risk
-                weather_line = f"\n🌤️ Weather for {job['start_date']}: {label}\n"
+                weather_line = t("weather_line", phone, date=job['start_date'], label=label)
         return t("job_posted", phone,
                  location=location, work_type=job["work_type"], num_labourers=job["num_labourers"],
                  wage=job["wage"], start_date=job["start_date"], weather_line=weather_line)
