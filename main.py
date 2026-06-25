@@ -318,14 +318,14 @@ T = {
     "ongoing_label_short": "Ongoing",
     "view_equipment_empty": "No equipment available for rent in {location} right now. 😔\nCheck back later!",
     "view_equipment_header": "🚜 *Equipment Available in {location}:*\n\n",
-    "view_equipment_item": "{i}. 🔧 {name}\n   💰 ₹{rent}/day\n   📅 Until: {until}\n   ➡️ Reply BOOK EQUIPMENT {eq_id} to book\n\n",
+    "view_equipment_item": "{i}. 🔧 {name}\n   💰 ₹{rent}/day\n   📅 {until_label}: {until}\n   ➡️ Reply BOOK EQUIPMENT {eq_id} to book\n\n",
     "book_equipment_unavailable": "❌ Sorry, {name} is no longer available for rent.",
     "book_own_equipment":   "❌ You can\'t book your own equipment.",
     "book_equipment_error": "❌ Could not complete booking. Please try again.",
     "book_equipment_success": "✅ *Equipment Booked!*\n\n🚜 Equipment: {name}\n💰 Rent: ₹{rent}/day\n📅 Available until: {until}\n\nThe owner has been notified. They will contact you shortly! 📞",
     "my_equipment_empty": "You haven\'t listed any equipment yet.\nReply RENT EQUIPMENT to add one.",
     "my_equipment_header":  "🚜 *Your Equipment Listings:*\n\n",
-    "my_equipment_footer":  "Reply CANCEL EQUIPMENT [id] to remove a listing.",
+    "my_equipment_until_label": "Until",
     "equip_status_available": "✅ Available",
     "equip_status_booked":    "🔒 Booked",
     "cancel_equipment_not_yours": "❌ You can only cancel your own equipment listings.",
@@ -425,6 +425,10 @@ T = {
     "lbl_labourers":  "labourers",
     # Weather line inserted after job-posted confirmation
     "weather_line": "\n🌤️ Weather for {date}: {label}\n",
+    # Weather risk labels (translated per user lang)
+    "weather_high_rain":   "⚠️ {chance}% chance of rain — you may want to plan around it.",
+    "weather_med_rain":    "🌦️ {chance}% chance of rain.",
+    "weather_low_rain":    "☀️ Low rain risk ({chance}%).",
     # TODAY command — action hint lines
     "today_job_done_hint":  "   • #{job_id} {work_type} — JOB DONE {job_id}\n",
     "today_rate_hint":      "   • RATE {job_id} [1-5]\n",
@@ -967,7 +971,7 @@ LOCATION_COORDS = {
     "PALANI":       (10.4486, 77.5240),
 }
 
-def get_rain_risk(location: str, target_date: date):
+def get_rain_risk(location: str, target_date: date, phone: str = ""):
     key = (location or "").strip().upper()
     coords = LOCATION_COORDS.get(key)
     if not coords: return None
@@ -992,9 +996,12 @@ def get_rain_risk(location: str, target_date: date):
         idx = dates.index(target_str)
         chance = probs[idx]
         if chance is None: return None
-        if chance >= 60:   label = f"⚠️ {chance}% chance of rain — you may want to plan around it."
-        elif chance >= 30: label = f"🌦️ {chance}% chance of rain."
-        else:              label = f"☀️ Low rain risk ({chance}%)."
+        if chance >= 60:
+            label = t("weather_high_rain", phone, chance=chance) if phone else f"⚠️ {chance}% chance of rain — you may want to plan around it."
+        elif chance >= 30:
+            label = t("weather_med_rain", phone, chance=chance) if phone else f"🌦️ {chance}% chance of rain."
+        else:
+            label = t("weather_low_rain", phone, chance=chance) if phone else f"☀️ Low rain risk ({chance}%)."
         return chance, label
     except Exception as e:
         print(f"[WEATHER] ERROR: {e}")
@@ -1806,14 +1813,21 @@ def handle_message(phone: str, raw_body: str) -> str:
             ongoing   = [j for j in history if j["status"] == "confirmed"]
             completed = [j for j in history if j["status"] == "completed"]
             cancelled = [j for j in history if j["status"] == "cancelled"]
+            _status_labels = {
+                "confirmed":  t("status_confirmed", phone),
+                "completed":  t("status_completed", phone),
+                "cancelled":  t("status_cancelled", phone),
+                "open":       t("status_open", phone),
+            }
             def _fmt_job(job, icon):
                 farm = get_from_db("farmers", job.get("farmer_phone")) if job.get("farmer_phone") else None
                 farm_name = farm["name"] if farm else t("unknown_name", phone)
+                status_display = _status_labels.get(job["status"], job["status"].upper())
                 return (
                     f"{icon} Job #{job['id']} — {job['work_type']}\n"
                     f"   📍 {job['location']} | 📅 {job['start_date']}\n"
                     f"   {t('job_history_farmer_label', phone, f_name=farm_name, wage=job['wage'])}\n"
-                    f"   {t('lbl_status', phone)}: {job['status'].upper()}\n\n"
+                    f"   {t('lbl_status', phone)}: {status_display}\n\n"
                 )
             msg = t("job_history_header", phone)
             if ongoing:
@@ -2132,7 +2146,7 @@ def handle_message(phone: str, raw_body: str) -> str:
             for i, item in enumerate(items):
                 until = item.get("available_until") or t("ongoing_label_short", phone)
                 msg += t("view_equipment_item", phone, i=i+1, name=item["name"],
-                         rent=item["rent_per_day"], until=until, eq_id=item["id"])
+                         rent=item["rent_per_day"], until=until, until_label=t("my_equipment_until_label", phone), eq_id=item["id"])
             return msg
 
         # BOOK EQUIPMENT
@@ -2174,7 +2188,7 @@ def handle_message(phone: str, raw_body: str) -> str:
                 until  = item.get("available_until") or t("ongoing_label_short", phone)
                 msg += (f"{i+1}. 🔧 {item['name']}\n"
                         f"   💰 ₹{item['rent_per_day']}/day | {status}\n"
-                        f"   📅 Until: {until}\n"
+                        f"   📅 {t('my_equipment_until_label', phone)}: {until}\n"
                         f"   ID: {item['id']}\n\n")
             msg += t("my_equipment_footer", phone)
             return msg
@@ -2320,7 +2334,7 @@ def handle_message(phone: str, raw_body: str) -> str:
         weather_line = ""
         parsed_date, _ = parse_job_date(raw_body, phone)
         if parsed_date:
-            risk = get_rain_risk(location, parsed_date)
+            risk = get_rain_risk(location, parsed_date, phone)
             if risk:
                 _, label = risk
                 weather_line = t("weather_line", phone, date=job['start_date'], label=label)
@@ -2399,7 +2413,7 @@ def handle_message(phone: str, raw_body: str) -> str:
         farmer = get_from_db("farmers", phone)
         equip  = sessions[phone]["equip"]
         available_until = None
-        if raw_body.strip().lower() not in ("ongoing", "anytime", "-"):
+        if raw_body.strip().lower() not in ("ongoing", "anytime", "-", "தொடர்ந்து", "जारी", "निरंतर", "कोई अंत नहीं"):
             is_valid, normalized_date, err = validate_future_date(raw_body, phone)
             if not is_valid:
                 return err
