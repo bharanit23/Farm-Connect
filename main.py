@@ -92,6 +92,7 @@ LOCALIZED_COMMANDS = {
     "மொழி":              "LANGUAGE",
     "என் தொழிலாளர்கள்":  "MY LABOURERS",
     "என் விவசாயிகள்":    "MY FARMERS",
+    "வானிலை":            "WEATHER",
     # Hindi
     "नौकरी पोस्ट करें":  "POST JOB",
     "मेरी नौकरियाँ":     "MY JOBS",
@@ -120,6 +121,7 @@ LOCALIZED_COMMANDS = {
     "भाषा":              "LANGUAGE",
     "मेरे मजदूर":        "MY LABOURERS",
     "मेरे किसान":        "MY FARMERS",
+    "मौसम":              "WEATHER",
 }
 
 # Verb-forming particles that natural speakers commonly glue onto a bare
@@ -434,6 +436,21 @@ T = {
     "today_rate_hint":      "   • RATE {job_id} [1-5]\n",
     "today_confirm_hint":   "   • #{job_id} {work_type} — ₹{wage}/day — CONFIRM {job_id}\n",
     "today_on_date":        "   • #{job_id} {work_type} on {start_date}\n",
+    # WEATHER command
+    "weather_cmd_header":   "🌤️ *3-Day Weather Forecast for {location}*\n\n",
+    "weather_cmd_day":       "📅 *{date}*\n   🌡️ {temp_min}°C – {temp_max}°C\n   🌧️ Rain chance: {rain}%  {rain_icon}\n\n",
+    "weather_cmd_footer":    "💡 Plan field work on low-rain days for best results.\nData: Open-Meteo (open-source forecast)",
+    "weather_cmd_unknown_location": (
+        "❓ Sorry, we don't have weather data for *{location}* yet.\n\n"
+        "Currently supported areas: Tiruchengode, Sankari, Erode, Namakkal, Rasipuram, "
+        "Komarapalayam, Pallipalayam, Elacipalayam, Mallasamudram, Dindigul, Palani.\n\n"
+        "More locations coming soon! 🌍"
+    ),
+    "weather_cmd_error":    "⚠️ Could not fetch weather right now. Please try again in a moment.",
+    "weather_cmd_unregistered": (
+        "❓ Please register first so we know your location.\n\n"
+        "Reply FARMER or LABOURER to get started."
+    ),
 }
 
 # ── In-memory translation cache ───────────────────────────────────────────────
@@ -539,7 +556,7 @@ KNOWN_COMMANDS = [
     "CONFIRM", "CANCEL", "RATE", "JOB DONE", "UPDATE SKILL",
     "RENT EQUIPMENT", "VIEW EQUIPMENT", "MY EQUIPMENT", "BOOK EQUIPMENT", "CANCEL EQUIPMENT",
     "SUBSIDIES", "SUBSIDY", "MY PROFILE", "JOB HISTORY", "TODAY", "REHIRE", "MY DAYS",
-    "NO SHOW", "HELP", "LANGUAGE",
+    "NO SHOW", "HELP", "LANGUAGE", "WEATHER",
 ]
 
 def fuzzy_suggestion(message, threshold=2):
@@ -569,6 +586,7 @@ def fuzzy_suggestion(message, threshold=2):
         "NO SHOW":          "Format: NO SHOW [job_id]  •  Example: NO SHOW 12",
         "HELP":             "Just send: HELP",
         "LANGUAGE":         "Just send: LANGUAGE",
+        "WEATHER":          "Just send: WEATHER",
     }
     for cmd in KNOWN_COMMANDS:
         if message.startswith(cmd) and message != cmd:
@@ -1007,6 +1025,44 @@ def get_rain_risk(location: str, target_date: date, phone: str = ""):
         print(f"[WEATHER] ERROR: {e}")
         return None
 
+def get_weather_3day(location: str):
+    """Fetch temperature + precipitation probability for the next 3 days.
+    Returns a list of dicts: date, temp_min, temp_max, rain.
+    Returns None if location unknown or API fails."""
+    key = (location or "").strip().upper()
+    coords = LOCATION_COORDS.get(key)
+    if not coords:
+        return None
+    lat, lon = coords
+    try:
+        url = (
+            "https://api.open-meteo.com/v1/forecast"
+            f"?latitude={lat}&longitude={lon}"
+            "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max"
+            "&timezone=Asia%2FKolkata"
+            "&forecast_days=3"
+        )
+        res = req.get(url, timeout=8)
+        res.raise_for_status()
+        data = res.json()
+        daily  = data.get("daily", {})
+        dates  = daily.get("time", [])
+        t_max  = daily.get("temperature_2m_max", [])
+        t_min  = daily.get("temperature_2m_min", [])
+        rain   = daily.get("precipitation_probability_max", [])
+        result = []
+        for i in range(min(3, len(dates))):
+            result.append({
+                "date":     dates[i],
+                "temp_max": round(t_max[i]) if t_max[i] is not None else "N/A",
+                "temp_min": round(t_min[i]) if t_min[i] is not None else "N/A",
+                "rain":     rain[i] if rain[i] is not None else 0,
+            })
+        return result if result else None
+    except Exception as e:
+        print(f"[WEATHER] get_weather_3day ERROR: {e}")
+        return None
+
 # ── Database helpers ──────────────────────────────────────────────────────────
 def save_to_db(table, data):
     try:
@@ -1362,7 +1418,8 @@ def help_farmer(phone: str) -> str:
         "⚠️ *NO SHOW [id]* — Report a labourer who didn't arrive\n   Example: NO SHOW 12\n"
         "🚜 *RENT EQUIPMENT* — List your equipment for rent\n🔧 *MY EQUIPMENT* — View your equipment listings\n"
         "🏛️ *SUBSIDIES* — Browse government schemes\n   Example: SUBSIDY 1\n"
-        "🪪 *MY PROFILE* — View your profile & rating\n🌐 *LANGUAGE* — Change language (Tamil/Hindi/English)\n\n"
+        "🪪 *MY PROFILE* — View your profile & rating\n🌐 *LANGUAGE* — Change language (Tamil/Hindi/English)\n"
+        "🌤️ *WEATHER* — 3-day weather forecast for your location\n\n"
         "Send HELP anytime to see this list."
     )
 
@@ -1406,7 +1463,8 @@ def help_labourer(phone: str) -> str:
         "🔖 *BOOK EQUIPMENT [id]* — Book equipment\n   Example: BOOK EQUIPMENT 3\n"
         "🏛️ *SUBSIDIES* — Browse government schemes\n   Example: SUBSIDY 1\n"
         "🛠️ *UPDATE SKILL* — Change your listed skill\n🪪 *MY PROFILE* — View your profile & rating\n"
-        "🌐 *LANGUAGE* — Change language (Tamil/Hindi/English)\n\nSend HELP anytime to see this list."
+        "🌐 *LANGUAGE* — Change language (Tamil/Hindi/English)\n"
+        "🌤️ *WEATHER* — 3-day weather forecast for your location\n\nSend HELP anytime to see this list."
     )
 
 def help_unregistered(phone: str) -> str:
@@ -1508,6 +1566,19 @@ def welcome_back(phone: str) -> str | None:
     labourer = get_from_db("labourers", phone)
     if labourer: return labourer_menu(labourer["name"], phone)
     return None
+
+# ── Input sanitization ────────────────────────────────────────────────────────
+def sanitize_name(raw: str) -> str:
+    """Trim, collapse whitespace, strip non-name characters, title-case."""
+    cleaned = re.sub(r"[^\w\s\-\.']", "", raw, flags=re.UNICODE).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned[:60] if cleaned else raw[:60]
+
+def sanitize_location(raw: str) -> str:
+    """Trim, collapse whitespace, strip special chars, title-case."""
+    cleaned = re.sub(r"[^\w\s\-\.',/]", "", raw, flags=re.UNICODE).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned[:80].title() if cleaned else raw[:80].title()
 
 # ── Core message handler ──────────────────────────────────────────────────────
 def handle_message(phone: str, raw_body: str) -> str:
@@ -2213,6 +2284,41 @@ def handle_message(phone: str, raw_body: str) -> str:
                     t("equip_cancel_booker_whatsapp", booked_by,
                       name=item["name"], location=item["location"]))
             return t("cancel_equipment_success", phone, eq_id=equipment_id, name=item["name"])
+
+        # WEATHER
+        elif message == "WEATHER":
+            user = get_from_db("farmers", phone) or get_from_db("labourers", phone)
+            if not user:
+                return t("weather_cmd_unregistered", phone)
+            location = user.get("location", "")
+            forecast = get_weather_3day(location)
+            if forecast is None:
+                # Check whether it's an unsupported location vs an API error
+                key = location.strip().upper()
+                if key not in LOCATION_COORDS:
+                    return t("weather_cmd_unknown_location", phone, location=location)
+                return t("weather_cmd_error", phone)
+            msg = t("weather_cmd_header", phone, location=location)
+            for day in forecast:
+                rain = day["rain"]
+                if rain >= 60:
+                    rain_icon = "⚠️ High"
+                elif rain >= 30:
+                    rain_icon = "🌦️ Moderate"
+                else:
+                    rain_icon = "☀️ Low"
+                # Format date nicely: "2025-06-28" → "28 Jun (Sat)"
+                try:
+                    d = datetime.strptime(day["date"], "%Y-%m-%d")
+                    date_label = d.strftime("%d %b (%a)")
+                except Exception:
+                    date_label = day["date"]
+                msg += t("weather_cmd_day", phone,
+                         date=date_label,
+                         temp_min=day["temp_min"], temp_max=day["temp_max"],
+                         rain=rain, rain_icon=rain_icon)
+            msg += t("weather_cmd_footer", phone)
+            return msg
 
         # SUBSIDIES
         elif message == "SUBSIDIES":
