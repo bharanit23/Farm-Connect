@@ -1008,11 +1008,41 @@ def get_rain_risk(location: str, target_date: date, phone: str = ""):
         if time.time() - cached_at < RAIN_CACHE_TTL:
             return cached_data
 
-    # ... rest of existing function unchanged ...
-    # After computing `return chance, label`, store it:
-    result = (chance, label)
-    _rain_cache[cache_key] = (time.time(), result)
-    return result
+    lat, lon = coords
+    url = (
+        "https://api.open-meteo.com/v1/forecast"
+        f"?latitude={lat}&longitude={lon}"
+        "&daily=precipitation_probability_max"
+        "&timezone=Asia%2FKolkata"
+        "&forecast_days=7"
+    )
+    try:
+        res = req.get(url, timeout=8)
+        res.raise_for_status()
+        data = res.json()
+        daily = data.get("daily", {})
+        dates = daily.get("time", [])
+        probs = daily.get("precipitation_probability_max", [])
+        target_str = target_date.strftime("%Y-%m-%d")
+        chance = None
+        for i, d in enumerate(dates):
+            if d == target_str and i < len(probs):
+                chance = probs[i] if probs[i] is not None else 0
+                break
+        if chance is None:
+            return None
+        if chance >= 60:
+            label = t("weather_high_rain", phone, chance=chance) if phone else f"⚠️ {chance}% chance of rain — you may want to plan around it."
+        elif chance >= 30:
+            label = t("weather_med_rain", phone, chance=chance) if phone else f"🌦️ {chance}% chance of rain."
+        else:
+            label = t("weather_low_rain", phone, chance=chance) if phone else f"☀️ Low rain risk ({chance}%)."
+        result = (chance, label)
+        _rain_cache[cache_key] = (time.time(), result)
+        return result
+    except Exception as e:
+        print(f"[RAIN RISK] get_rain_risk ERROR: {e}")
+        return None
 
 # ── Weather cache (location → (timestamp, result)) ───────────────────────────
 _weather_cache: dict[str, tuple[float, list]] = {}
