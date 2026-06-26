@@ -176,11 +176,13 @@ T = {
         "🌐 Reply LANGUAGE to choose Tamil / Hindi / English."
     ),
     "ask_name": "Great! What is your name?",
+    "name_invalid": "Please enter a valid name using letters (e.g. Ramasamy).",
     "ask_location": (
         "Nice to meet you, {name}! 🙏\n\n"
         "What is your village or town name?\n"
         "(We\'ll also notify you about jobs/equipment in nearby areas, not just an exact match.)"
     ),
+    "location_invalid": "Please enter a valid village or town name using letters (e.g. Tiruchengode).",
     "registered_farmer": "✅ *Registered as Farmer!*\n\n👤 Name: {name}\n📍 Location: {location}\n\nReply POST JOB to post your first job! 🌾",
     "registered_labourer": "✅ *Registered as Labourer!*\n\n👤 Name: {name}\n📍 Location: {location}\n🛠️ Skill: {skill}\n\nReply VIEW JOBS to see available jobs near you! 💪",
     "language_prompt": (
@@ -202,6 +204,7 @@ T = {
     "db_fetch_error": "❌ Could not fetch data. Please try again.",
     "job_not_found": "❌ Job not found or you don\'t own this job.",
     "post_job_start": "📋 *Let\'s post your job!*\n\nWhat type of work is needed?\n(e.g. Harvesting, Planting, Irrigation, Weeding)",
+    "work_type_invalid": "Please describe the type of work (e.g. Harvesting, Planting).",
     "ask_num_labourers": "How many labourers do you need?",
     "ask_num_labourers_invalid": "Please enter a number. How many labourers do you need?",
     "ask_wage": "What is the wage per day? (in ₹)",
@@ -313,6 +316,7 @@ T = {
     "no_deadline": "🟢 No fixed deadline — apply anytime.",
     "rent_equipment_start": "🚜 *Let\'s list your equipment!*\n\nWhat equipment do you want to rent out?\n(e.g. Tractor, Rotavator, Sprayer, Thresher)",
     "ask_rent_per_day": "What is the rent per day for your {name}? (in ₹)",
+    "equip_name_invalid": "Please enter the name of the equipment (e.g. Tractor, Power Tiller).",
     "ask_rent_invalid": "Please enter a valid amount (e.g. 500). What is the rent per day?",
     "ask_available_until": "Available until which date?\n(e.g. {example}, Tomorrow, or reply *ongoing* if no end date)",
     "equipment_listed": "✅ *Equipment Listed!*\n\n🚜 Equipment: {name}\n💰 Rent: ₹{rent}/day\n📍 Location: {location}\n📅 Available until: {until}\n\nFarmers and labourers nearby can now find your equipment! 🔔",
@@ -1569,16 +1573,27 @@ def welcome_back(phone: str) -> str | None:
 
 # ── Input sanitization ────────────────────────────────────────────────────────
 def sanitize_name(raw: str) -> str:
-    """Trim, collapse whitespace, strip non-name characters, title-case."""
-    cleaned = re.sub(r"[^\w\s\-\.']", "", raw, flags=re.UNICODE).strip()
+    """Trim, collapse whitespace, strip non-name characters, title-case.
+    Returns "" if nothing safe remains (caller should re-prompt) — we never
+    fall back to the unsanitized raw text, or the sanitization is pointless."""
+    cleaned = re.sub(r"[^\w\s\-\.']", "", raw or "", flags=re.UNICODE).strip()
     cleaned = re.sub(r"\s+", " ", cleaned)
-    return cleaned[:60] if cleaned else raw[:60]
+    return cleaned[:60].title() if cleaned else ""
 
 def sanitize_location(raw: str) -> str:
-    """Trim, collapse whitespace, strip special chars, title-case."""
-    cleaned = re.sub(r"[^\w\s\-\.',/]", "", raw, flags=re.UNICODE).strip()
+    """Trim, collapse whitespace, strip special chars, title-case.
+    Returns "" if nothing safe remains (caller should re-prompt)."""
+    cleaned = re.sub(r"[^\w\s\-\.',/]", "", raw or "", flags=re.UNICODE).strip()
     cleaned = re.sub(r"\s+", " ", cleaned)
-    return cleaned[:80].title() if cleaned else raw[:80].title()
+    return cleaned[:80].title() if cleaned else ""
+
+def sanitize_freetext(raw: str, limit: int = 120) -> str:
+    """For free-text fields where casing/punctuation matters (work type,
+    equipment name) — strip control characters and cap length, but don't
+    restrict to a name/location character set."""
+    cleaned = re.sub(r"[\x00-\x1f\x7f]", "", raw or "").strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned[:limit]
 
 # ── Core message handler ──────────────────────────────────────────────────────
 def handle_message(phone: str, raw_body: str) -> str:
@@ -1653,12 +1668,18 @@ def handle_message(phone: str, raw_body: str) -> str:
         return t("reply_farmer_or_labourer", phone)
 
     elif step == "name":
-        sessions[phone]["name"] = raw_body
+        clean_name = sanitize_name(raw_body)
+        if not clean_name:
+            return t("name_invalid", phone)
+        sessions[phone]["name"] = clean_name
         sessions[phone]["step"] = "location"
-        return t("ask_location", phone, name=raw_body)
+        return t("ask_location", phone, name=clean_name)
 
     elif step == "location":
-        sessions[phone]["location"] = raw_body.title()
+        clean_location = sanitize_location(raw_body)
+        if not clean_location:
+            return t("location_invalid", phone)
+        sessions[phone]["location"] = clean_location
         role = sessions[phone].get("role")
         if role == "labourer":
             sessions[phone]["step"] = "skill"
@@ -2385,12 +2406,15 @@ def handle_message(phone: str, raw_body: str) -> str:
 
     # ── JOB POSTING FLOW ──────────────────────────────────────────────────────
     elif step == "job_work_type":
-        sessions[phone]["job"]["work_type"] = raw_body
+        clean_work_type = sanitize_freetext(raw_body, limit=60)
+        if not clean_work_type:
+            return t("work_type_invalid", phone)
+        sessions[phone]["job"]["work_type"] = clean_work_type
         sessions[phone]["step"] = "job_num_labourers"
         return t("ask_num_labourers", phone)
 
     elif step == "job_num_labourers":
-        if not raw_body.isdigit():
+        if not raw_body.isdigit() or int(raw_body) < 1:
             return t("ask_num_labourers_invalid", phone)
         sessions[phone]["job"]["num_labourers"] = int(raw_body)
         sessions[phone]["step"] = "job_wage"
@@ -2403,7 +2427,7 @@ def handle_message(phone: str, raw_body: str) -> str:
         return t("ask_wage", phone)
 
     elif step == "job_wage":
-        if not raw_body.replace(".", "", 1).isdigit():
+        if not raw_body.replace(".", "", 1).isdigit() or float(raw_body) <= 0:
             return t("ask_wage_invalid", phone)
         sessions[phone]["job"]["wage"] = raw_body
         sessions[phone]["step"] = "job_date"
@@ -2504,9 +2528,12 @@ def handle_message(phone: str, raw_body: str) -> str:
 
     # ── EQUIPMENT LISTING FLOW ────────────────────────────────────────────────
     elif step == "equip_name":
-        sessions[phone]["equip"]["name"] = raw_body
+        clean_equip_name = sanitize_freetext(raw_body, limit=60)
+        if not clean_equip_name:
+            return t("equip_name_invalid", phone)
+        sessions[phone]["equip"]["name"] = clean_equip_name
         sessions[phone]["step"] = "equip_rent"
-        return t("ask_rent_per_day", phone, name=raw_body)
+        return t("ask_rent_per_day", phone, name=clean_equip_name)
 
     elif step == "equip_rent":
         if not raw_body.replace(".", "", 1).isdigit():
@@ -2674,8 +2701,6 @@ def chat_ui():
 <div class="phone-bar">
   <label>Testing as:</label>
   <select id="phonePreset" onchange="updatePhone()">
-    <option value="whatsapp:+918754176823">Bharani T (+91 8754176823)</option>
-    <option value="whatsapp:+919942149060">User 2 (+91 9942149060)</option>
     <option value="web_farmer_test">New Farmer (fresh)</option>
     <option value="web_labourer_test">New Labourer (fresh)</option>
     <option value="custom">Custom phone...</option>
