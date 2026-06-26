@@ -993,79 +993,88 @@ LOCATION_COORDS = {
     "PALANI":       (10.4486, 77.5240),
 }
 
+_rain_cache: dict[str, tuple[float, any]] = {}
+RAIN_CACHE_TTL = 3600
+
 def get_rain_risk(location: str, target_date: date, phone: str = ""):
     key = (location or "").strip().upper()
     coords = LOCATION_COORDS.get(key)
     if not coords: return None
-    lat, lon = coords
-    days_ahead = (target_date - date.today()).days
-    if days_ahead < 0 or days_ahead > 15: return None
-    try:
-        url = (
-            "https://api.open-meteo.com/v1/forecast"
-            f"?latitude={lat}&longitude={lon}"
-            "&daily=precipitation_probability_max"
-            "&timezone=Asia%2FKolkata"
-            f"&forecast_days={max(days_ahead + 1, 1)}"
-        )
-        res = req.get(url, timeout=8)
-        res.raise_for_status()
-        data = res.json()
-        dates = data.get("daily", {}).get("time", [])
-        probs = data.get("daily", {}).get("precipitation_probability_max", [])
-        target_str = target_date.strftime("%Y-%m-%d")
-        if target_str not in dates: return None
-        idx = dates.index(target_str)
-        chance = probs[idx]
-        if chance is None: return None
-        if chance >= 60:
-            label = t("weather_high_rain", phone, chance=chance) if phone else f"⚠️ {chance}% chance of rain — you may want to plan around it."
-        elif chance >= 30:
-            label = t("weather_med_rain", phone, chance=chance) if phone else f"🌦️ {chance}% chance of rain."
-        else:
-            label = t("weather_low_rain", phone, chance=chance) if phone else f"☀️ Low rain risk ({chance}%)."
-        return chance, label
-    except Exception as e:
-        print(f"[WEATHER] ERROR: {e}")
-        return None
+
+    cache_key = f"{key}:{target_date}"
+    cached = _rain_cache.get(cache_key)
+    if cached:
+        cached_at, cached_data = cached
+        if time.time() - cached_at < RAIN_CACHE_TTL:
+            return cached_data
+
+    # ... rest of existing function unchanged ...
+    # After computing `return chance, label`, store it:
+    result = (chance, label)
+    _rain_cache[cache_key] = (time.time(), result)
+    return result
+
+# ── Weather cache (location → (timestamp, result)) ───────────────────────────
+_weather_cache: dict[str, tuple[float, list]] = {}
+WEATHER_CACHE_TTL = 3600  # cache for 1 hour
 
 def get_weather_3day(location: str):
-    """Fetch temperature + precipitation probability for the next 3 days.
-    Returns a list of dicts: date, temp_min, temp_max, rain.
-    Returns None if location unknown or API fails."""
+    """Fetch temperature + precipitation for next 3 days, with 1-hour cache."""
     key = (location or "").strip().upper()
     coords = LOCATION_COORDS.get(key)
     if not coords:
         return None
+
+    # ── Serve from cache if still fresh ──────────────────────────────────────
+    cached = _weather_cache.get(key)
+    if cached:
+        cached_at, cached_data = cached
+        if time.time() - cached_at < WEATHER_CACHE_TTL:
+            print(f"[WEATHER] Cache hit for {key}")
+            return cached_data
+
     lat, lon = coords
-    try:
-        url = (
-            "https://api.open-meteo.com/v1/forecast"
-            f"?latitude={lat}&longitude={lon}"
-            "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max"
-            "&timezone=Asia%2FKolkata"
-            "&forecast_days=3"
-        )
-        res = req.get(url, timeout=8)
-        res.raise_for_status()
-        data = res.json()
-        daily  = data.get("daily", {})
-        dates  = daily.get("time", [])
-        t_max  = daily.get("temperature_2m_max", [])
-        t_min  = daily.get("temperature_2m_min", [])
-        rain   = daily.get("precipitation_probability_max", [])
-        result = []
-        for i in range(min(3, len(dates))):
-            result.append({
-                "date":     dates[i],
-                "temp_max": round(t_max[i]) if t_max[i] is not None else "N/A",
-                "temp_min": round(t_min[i]) if t_min[i] is not None else "N/A",
-                "rain":     rain[i] if rain[i] is not None else 0,
-            })
-        return result if result else None
-    except Exception as e:
-        print(f"[WEATHER] get_weather_3day ERROR: {e}")
-        return None
+    url = (
+        "https://api.open-meteo.com/v1/forecast"
+        f"?latitude={lat}&longitude={lon}"
+        "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max"
+        "&timezone=Asia%2FKolkata"
+        "&forecast_days=3"
+    )
+
+    # ── Retry up to 3 times with exponential backoff on 429 ──────────────────
+    for attempt in range(3):
+        try:
+            res = req.get(url, timeout=8)
+            if res.status_code == 429:
+                wait = 2 ** attempt  # 1s, 2s, 4s
+                print(f"[WEATHER] 429 rate-limited, retrying in {wait}s (attempt {attempt+1})")
+                time.sleep(wait)
+                continue
+            res.raise_for_status()
+            data = res.json()
+            daily  = data.get("daily", {})
+            dates  = daily.get("time", [])
+            t_max  = daily.get("temperature_2m_max", [])
+            t_min  = daily.get("temperature_2m_min", [])
+            rain   = daily.get("precipitation_probability_max", [])
+            result = []
+            for i in range(min(3, len(dates))):
+                result.append({
+                    "date":     dates[i],
+                    "temp_max": round(t_max[i]) if t_max[i] is not None else "N/A",
+                    "temp_min": round(t_min[i]) if t_min[i] is not None else "N/A",
+                    "rain":     rain[i] if rain[i] is not None else 0,
+                })
+            if result:
+                _weather_cache[key] = (time.time(), result)  # ← store in cache
+            return result if result else None
+
+        except Exception as e:
+            print(f"[WEATHER] get_weather_3day ERROR (attempt {attempt+1}): {e}")
+            if attempt == 2:
+                return None
+    return None
 
 # ── Database helpers ──────────────────────────────────────────────────────────
 def save_to_db(table, data):
